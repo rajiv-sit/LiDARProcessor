@@ -28,3 +28,4 @@
 
 ## 7. Runtime Observability
 - Once built, the executable logs the sensor identity (`Velodyne HDL-32E`) and keeps the ImGui stats window updated with total, ground, non-ground, and GPU capacity numbers; the double-buffering ensures the UI draws what the `VelodyneLidar` scan provided without stalling the reader (`velodyne/src/engine/LidarEngine.cpp:37-69`, `visualization/Visualizer.cpp:115-189`).
+

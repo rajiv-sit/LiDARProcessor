@@ -46,8 +46,7 @@ LiDARProcessor is a standalone C++20 application that replays Velodyne `.pcap` t
  - Try toggling the camera view, zoom, and classification palette to observe how the altitude zone colors slot into the shader, and notice the stats window updating as new scans cycle through.
 
 ## Visual Reference
-![Visualizer preview](figures/visualizer.png)
-
+<img width="1915" height="1032" alt="image" src="https://github.com/user-attachments/assets/a217132f-ef2f-47ab-93ce-b8fcd120d254" />
 Figure 1: The ImGui-driven visualization with altitude zoning, point stats, and shader-driven coloring.
 
 ## LiDAR Ecosystem & Roadmap

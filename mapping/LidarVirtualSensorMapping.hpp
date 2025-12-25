@@ -23,7 +23,7 @@ public:
 
     explicit LidarVirtualSensorMapping(float forwardOffset = 3.0F,
                                        float rearOffset = -0.2F,
-                                       float floorHeight = -1.5F);
+                                       float floorHeight = -1.8F);
 
     void setOffsets(float forwardOffset, float rearOffset);
     void setFloorHeight(float floorHeight);

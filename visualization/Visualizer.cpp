@@ -3,20 +3,35 @@
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
+#include <glm/gtc/constants.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <imgui_impl_glfw.hpp>
 #include <imgui_impl_opengl3.hpp>
 
+#include <algorithm>
 #include <array>
+#include <charconv>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <limits>
+#include <map>
+#include <string>
+#include <string_view>
+#include <system_error>
 
 namespace visualization
 {
 
 namespace
 {
+namespace fs = std::filesystem;
+
+const fs::path kVehicleProfileDirectory{"data"};
+constexpr const char* kVehicleProfilePrefix = "VehicleProfile";
+constexpr const char* kDefaultVehicleProfileFilename = "VehicleProfileCustom.ini";
 constexpr const char* kVertexShaderPath = "shaders/point.vs";
 constexpr const char* kFragmentShaderPath = "shaders/point.fs";
 constexpr std::array<const char*, 3> kColorModeLabels = {"Classification", "Height", "Intensity"};
@@ -35,6 +50,196 @@ const std::array<glm::vec3, 5> kZoneColors = {
     glm::vec3(1.0F, 0.9F, 0.3F),
     glm::vec3(1.0F, 0.55F, 0.0F),
     glm::vec3(0.9F, 0.1F, 0.1F)};
+constexpr float kDefaultMountHeight = 1.8F;
+constexpr float kVirtualSensorMaxRange = 7.0F;
+constexpr float kVirtualSensorThickness = 0.5F;
+constexpr float kVirtualSensorPointSize = 6.0F;
+
+std::string_view trim(std::string_view value)
+{
+    const auto first = value.find_first_not_of(" \t\r\n");
+    if (first == std::string_view::npos)
+    {
+        return {};
+    }
+    const auto last = value.find_last_not_of(" \t\r\n");
+    return value.substr(first, last - first + 1);
+}
+
+bool parseFloat(std::string_view text, float& out)
+{
+    const auto result = std::from_chars(text.data(), text.data() + text.size(), out);
+    return result.ec == std::errc();
+}
+
+bool parseInt(std::string_view text, int& out)
+{
+    const auto result = std::from_chars(text.data(), text.data() + text.size(), out);
+    return result.ec == std::errc();
+}
+
+std::string_view stripInlineComment(std::string_view value)
+{
+    const auto semicolon = value.find(';');
+    if (semicolon != std::string_view::npos)
+    {
+        value.remove_suffix(value.size() - semicolon);
+    }
+    return value;
+}
+
+VehicleProfileData loadVehicleProfile(const fs::path& profilePath)
+{
+    VehicleProfileData profile;
+    profile.lidarHeightAboveGround = kDefaultMountHeight;
+
+    std::ifstream file(profilePath);
+    if (!file)
+    {
+        return profile;
+    }
+
+    std::string currentSection;
+    std::map<int, glm::vec2> contourPoints;
+    std::string line;
+    while (std::getline(file, line))
+    {
+        std::string_view trimmedLine = trim(line);
+        if (trimmedLine.empty())
+        {
+            continue;
+        }
+
+        const char firstChar = trimmedLine.front();
+        if (firstChar == ';' || firstChar == '#')
+        {
+            continue;
+        }
+
+        if (firstChar == '[')
+        {
+            currentSection = std::string(trimmedLine);
+            continue;
+        }
+
+        const auto eqPos = trimmedLine.find('=');
+        if (eqPos == std::string_view::npos)
+        {
+            continue;
+        }
+
+        std::string_view rawKey = trim(trimmedLine.substr(0, eqPos));
+        std::string_view rawValue = trim(trimmedLine.substr(eqPos + 1));
+        rawValue = stripInlineComment(rawValue);
+        rawValue = trim(rawValue);
+        if (rawValue.empty())
+        {
+            continue;
+        }
+
+        if (currentSection == "[Contour]")
+        {
+            constexpr std::string_view kContourPrefix = "contourPt";
+            if (!rawKey.starts_with(kContourPrefix))
+            {
+                continue;
+            }
+
+            int index = 0;
+            const auto indexText = rawKey.substr(kContourPrefix.size());
+            if (!parseInt(indexText, index))
+            {
+                continue;
+            }
+
+            const auto commaPos = rawValue.find(',');
+            if (commaPos == std::string_view::npos)
+            {
+                continue;
+            }
+
+            std::string_view xText = trim(rawValue.substr(0, commaPos));
+            std::string_view yText = trim(rawValue.substr(commaPos + 1));
+            if (xText.empty() || yText.empty())
+            {
+                continue;
+            }
+
+            float lon = 0.0F;
+            float lat = 0.0F;
+            if (!parseFloat(xText, lon) || !parseFloat(yText, lat))
+            {
+                continue;
+            }
+
+            contourPoints[index] = glm::vec2(lat, lon); // INI columns are [longitude, latitude]; swap to match VCS (x=lat, y=lon)
+            continue;
+        }
+
+        if (currentSection == "[Geometry]")
+        {
+            if (rawKey == "distRearAxle")
+            {
+                float value = 0.0F;
+                if (parseFloat(rawValue, value))
+                {
+                    profile.distRearAxle = value;
+                }
+            }
+            continue;
+        }
+
+        if (currentSection == "[LiDAR]")
+        {
+            if (rawKey == "heightAboveGround")
+            {
+                float value = 0.0F;
+                if (parseFloat(rawValue, value))
+                {
+                    profile.lidarHeightAboveGround = value;
+                }
+            }
+            else if (rawKey == "latPos")
+            {
+                parseFloat(rawValue, profile.lidarLatPos);
+            }
+            else if (rawKey == "lonPos")
+            {
+                parseFloat(rawValue, profile.lidarLonPos);
+            }
+            else if (rawKey == "orientation")
+            {
+                parseFloat(rawValue, profile.lidarOrientation);
+            }
+            continue;
+        }
+    }
+
+    profile.contour.reserve(contourPoints.size());
+    for (const auto& entry : contourPoints)
+    {
+        profile.contour.push_back(entry.second);
+    }
+
+    return profile;
+}
+
+bool vehicleProfileItemsGetter(void* data, int idx, const char** out_text)
+{
+    if (!data || idx < 0)
+    {
+        return false;
+    }
+
+    const auto* entries = reinterpret_cast<const std::vector<std::string>*>(data);
+    if (!entries || idx >= static_cast<int>(entries->size()))
+    {
+        return false;
+    }
+
+    *out_text = entries->at(idx).c_str();
+    return true;
+}
 } // namespace
 
 Visualizer::~Visualizer()
@@ -76,6 +281,9 @@ bool Visualizer::initialize()
         return false;
     }
 
+    refreshVehicleProfiles();
+    applyVehicleProfile(m_selectedVehicleProfileIndex);
+
     glEnable(GL_PROGRAM_POINT_SIZE);
 
     if (!m_shader.load(kVertexShaderPath, kFragmentShaderPath))
@@ -83,38 +291,22 @@ bool Visualizer::initialize()
         return false;
     }
 
+    m_forceColorLoc = m_shader.uniformLocation("uForceColor");
+    m_forcedColorLoc = m_shader.uniformLocation("uForcedColor");
+    m_forcedAlphaLoc = m_shader.uniformLocation("uForcedAlpha");
+    m_pointSizeLoc = m_shader.uniformLocation("uPointSize");
+
     glGenVertexArrays(1, &m_vao);
     glGenBuffers(1, &m_vbo);
-    glBindVertexArray(m_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
-    glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_DYNAMIC_DRAW);
+    configureVertexArray(m_vao, m_vbo);
 
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(
-        0,
-        3,
-        GL_FLOAT,
-        GL_FALSE,
-        static_cast<GLsizei>(sizeof(Vertex)),
-        reinterpret_cast<void*>(offsetof(Vertex, x)));
+    glGenVertexArrays(1, &m_mapVao);
+    glGenBuffers(1, &m_mapVbo);
+    configureVertexArray(m_mapVao, m_mapVbo);
 
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(
-        1,
-        1,
-        GL_FLOAT,
-        GL_FALSE,
-        static_cast<GLsizei>(sizeof(Vertex)),
-        reinterpret_cast<void*>(offsetof(Vertex, intensity)));
-
-    glEnableVertexAttribArray(2);
-    glVertexAttribPointer(
-        2,
-        1,
-        GL_FLOAT,
-        GL_FALSE,
-        static_cast<GLsizei>(sizeof(Vertex)),
-        reinterpret_cast<void*>(offsetof(Vertex, classification)));
+    glGenVertexArrays(1, &m_overlayVao);
+    glGenBuffers(1, &m_overlayVbo);
+    configureVertexArray(m_overlayVao, m_overlayVbo);
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -128,12 +320,18 @@ void Visualizer::updatePoints(const BaseLidarSensor::PointCloud& points)
 {
     std::vector<Vertex> ground;
     std::vector<Vertex> nonGround;
+    BaseLidarSensor::PointCloud nonGroundPoints;
     ground.reserve(points.size());
     nonGround.reserve(points.size());
+    nonGroundPoints.reserve(points.size());
 
     const bool useZoneColors = m_cameraMode == CameraMode::FreeOrbit;
     for (const auto& point : points)
     {
+        lidar::LidarPoint translatedPoint = point;
+        translatedPoint.x += m_lidarTranslation.x;
+        translatedPoint.y += m_lidarTranslation.y;
+
         const bool groundPoint = isGroundPoint(point);
         float classification = groundPoint ? 0.0F : 1.0F;
         if (useZoneColors)
@@ -141,8 +339,8 @@ void Visualizer::updatePoints(const BaseLidarSensor::PointCloud& points)
             classification = static_cast<float>(zoneIndexFromHeight(point.z));
         }
         Vertex vertex{
-            point.x,
-            point.y,
+            translatedPoint.x,
+            translatedPoint.y,
             point.z,
             point.intensity,
             classification,
@@ -155,8 +353,14 @@ void Visualizer::updatePoints(const BaseLidarSensor::PointCloud& points)
         else
         {
             nonGround.push_back(vertex);
+            if (point.z >= m_floorHeight)
+            {
+                nonGroundPoints.push_back(translatedPoint);
+            }
         }
     }
+
+    m_virtualSensorMapping.updatePoints(nonGroundPoints);
 
     m_groundPointCount = ground.size();
     m_nonGroundPointCount = nonGround.size();
@@ -229,6 +433,53 @@ void Visualizer::render()
         glDepthMask(depthMask);
     }
 
+    if (m_worldFrameSettings.enableWorldVisualization && m_worldFrameSettings.showVirtualSensorMap)
+    {
+        drawVirtualSensorsFancy();
+        drawVirtualSensorMap();
+    }
+
+    if (m_worldFrameSettings.enableWorldVisualization && m_worldFrameSettings.showVehicleContour &&
+        !m_vehicleContour.empty())
+    {
+        const float rotationDegrees = m_worldFrameSettings.vehicleContourRotation;
+        const float epsilon = 1e-3F;
+        const bool needsRotation = std::fabs(rotationDegrees) > epsilon;
+        const float rotationRadians = glm::radians(rotationDegrees);
+        const float cosValue = std::cos(rotationRadians);
+        const float sinValue = std::sin(rotationRadians);
+        auto rotatePoint = [&](const glm::vec2& value) -> glm::vec2 {
+            if (!needsRotation)
+            {
+                return value;
+            }
+            return glm::vec2(
+                cosValue * value.x - sinValue * value.y,
+                sinValue * value.x + cosValue * value.y);
+        };
+
+        std::vector<glm::vec2> rotatedContour;
+        const std::vector<glm::vec2>* contourToDraw = &m_vehicleContour;
+        if (needsRotation)
+        {
+            rotatedContour.reserve(m_vehicleContour.size());
+            for (const auto& point : m_vehicleContour)
+            {
+                rotatedContour.push_back(rotatePoint(point));
+            }
+            contourToDraw = &rotatedContour;
+        }
+
+        const auto& color = m_worldFrameSettings.vehicleContourColor;
+        drawOverlayPolygon(
+            *contourToDraw,
+            glm::vec3(color[0], color[1], color[2]),
+            m_worldFrameSettings.vehicleContourTransparency);
+
+        const glm::vec2 rotatedLidarPosition = rotatePoint(m_lidarVcsPosition);
+        drawLidarMountMarker(rotatedLidarPosition, rotationDegrees);
+    }
+
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
@@ -285,6 +536,30 @@ void Visualizer::cleanUp()
     {
         glDeleteVertexArrays(1, &m_vao);
         m_vao = 0;
+    }
+
+    if (m_mapVbo)
+    {
+        glDeleteBuffers(1, &m_mapVbo);
+        m_mapVbo = 0;
+    }
+
+    if (m_mapVao)
+    {
+        glDeleteVertexArrays(1, &m_mapVao);
+        m_mapVao = 0;
+    }
+
+    if (m_overlayVbo)
+    {
+        glDeleteBuffers(1, &m_overlayVbo);
+        m_overlayVbo = 0;
+    }
+
+    if (m_overlayVao)
+    {
+        glDeleteVertexArrays(1, &m_overlayVao);
+        m_overlayVao = 0;
     }
 
     ImGui_ImplOpenGL3_Shutdown();
@@ -386,6 +661,11 @@ void Visualizer::applyUniforms()
         glUniform1i(useZoneColorsLoc, useZoneColors ? GL_TRUE : GL_FALSE);
     }
 
+    if (m_forceColorLoc >= 0)
+    {
+        glUniform1i(m_forceColorLoc, GL_FALSE);
+    }
+
     const GLint viewProjLoc = m_shader.uniformLocation("uViewProjection");
     if (viewProjLoc >= 0 && m_window)
     {
@@ -408,6 +688,11 @@ void Visualizer::applyUniforms()
         const glm::mat4 viewProj = projection * view;
         glUniformMatrix4fv(viewProjLoc, 1, GL_FALSE, glm::value_ptr(viewProj));
     }
+
+    if (m_pointSizeLoc >= 0)
+    {
+        glUniform1f(m_pointSizeLoc, m_worldFrameSettings.pointSize);
+    }
 }
 
 void Visualizer::drawWorldControls()
@@ -416,6 +701,39 @@ void Visualizer::drawWorldControls()
     if (ImGui::TreeNodeEx("General", ImGuiTreeNodeFlags_DefaultOpen))
     {
         ImGui::Checkbox("Enable visualization", &m_worldFrameSettings.enableWorldVisualization);
+        ImGui::Checkbox("Show virtual sensor map", &m_worldFrameSettings.showVirtualSensorMap);
+        ImGui::Checkbox("Show vehicle contour", &m_worldFrameSettings.showVehicleContour);
+        if (!m_vehicleProfileEntries.empty())
+        {
+            int profileIdx = m_selectedVehicleProfileIndex;
+            if (ImGui::Combo(
+                    "Vehicle profile",
+                    &profileIdx,
+                    vehicleProfileItemsGetter,
+                    &m_vehicleProfileEntries,
+                    static_cast<int>(m_vehicleProfileEntries.size())))
+            {
+                applyVehicleProfile(profileIdx);
+            }
+        }
+        if (m_worldFrameSettings.showVehicleContour)
+        {
+            ImGuiColorEditFlags colorFlags = ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_Float;
+            auto& contourColor = m_worldFrameSettings.vehicleContourColor;
+            ImGui::ColorEdit3("Vehicle contour color", contourColor.data(), colorFlags);
+            ImGui::SliderFloat(
+                "Contour transparency",
+                &m_worldFrameSettings.vehicleContourTransparency,
+                0.1F,
+                1.0F);
+            ImGui::SliderFloat(
+                "Contour rotation",
+                &m_worldFrameSettings.vehicleContourRotation,
+                -180.0F,
+                180.0F,
+                "%.0f\u00B0");
+            ImGui::Spacing();
+        }
         ImGui::Separator();
 
         ImGui::SliderFloat("Point size", &m_worldFrameSettings.pointSize, 1.0F, 6.0F);
@@ -518,6 +836,157 @@ void Visualizer::drawWorldControls()
         ImGui::TreePop();
     }
     ImGui::End();
+}
+
+void Visualizer::drawVirtualSensorMap()
+{
+    buildVirtualSensorMapVertices();
+    if (m_virtualSensorMapVertices.size() < 4)
+    {
+        return;
+    }
+
+    updateVirtualSensorMapBuffer();
+
+    GLboolean depthMask = GL_TRUE;
+    glGetBooleanv(GL_DEPTH_WRITEMASK, &depthMask);
+    glDepthMask(GL_FALSE);
+
+    glBindVertexArray(m_mapVao);
+    applyForceColor(glm::vec3(1.0F, 1.0F, 0.75F), 0.08F);
+
+    glLineWidth(2.0F);
+    glDrawArrays(GL_LINE_LOOP, 0, static_cast<GLsizei>(m_virtualSensorMapVertices.size()));
+
+    resetForceColor();
+
+    glDepthMask(depthMask);
+}
+
+void Visualizer::drawVirtualSensorsFancy()
+{
+    const auto snapshots = m_virtualSensorMapping.snapshots();
+    if (snapshots.empty())
+    {
+        return;
+    }
+
+    GLboolean depthMask = GL_TRUE;
+    glGetBooleanv(GL_DEPTH_WRITEMASK, &depthMask);
+    glDepthMask(GL_FALSE);
+
+    const glm::vec3 shadowColor(0.1F, 0.3F, 0.9F);
+    const glm::vec3 measurementColor(0.2F, 0.9F, 0.4F);
+    const glm::vec3 pointColor(1.0F, 0.9F, 0.3F);
+    for (const auto& snapshot : snapshots)
+    {
+        if (!snapshot.valid)
+        {
+            continue;
+        }
+
+        drawOverlayPolygon(buildSensorShadowPolygon(snapshot), shadowColor, 0.12F);
+        drawOverlayPolygon(buildSensorMeasurementPolygon(snapshot), measurementColor, 0.7F);
+        drawSensorPoint(snapshot, pointColor, 1.0F);
+    }
+
+    if (m_pointSizeLoc >= 0)
+    {
+        glUniform1f(m_pointSizeLoc, m_worldFrameSettings.pointSize);
+    }
+
+    glDepthMask(depthMask);
+}
+
+void Visualizer::buildVirtualSensorMapVertices()
+{
+    struct AnglePoint
+    {
+        float angle;
+        glm::vec2 position;
+    };
+
+    const auto& hull = m_virtualSensorMapping.hull();
+    if (hull.size() < 3)
+    {
+        m_virtualSensorMapVertices.clear();
+        return;
+    }
+
+    std::vector<AnglePoint> ordered;
+    ordered.reserve(hull.size());
+    const float twoPi = glm::two_pi<float>();
+    for (const auto& position : hull)
+    {
+        float angle = std::atan2(position.y, position.x);
+        if (angle < 0.0F)
+        {
+            angle += twoPi;
+        }
+        ordered.push_back(AnglePoint{angle, position});
+    }
+
+    std::sort(ordered.begin(), ordered.end(), [](const AnglePoint& a, const AnglePoint& b) {
+        return a.angle < b.angle;
+    });
+
+    m_virtualSensorMapVertices.clear();
+    m_virtualSensorMapVertices.reserve(ordered.size());
+    for (const auto& entry : ordered)
+    {
+        m_virtualSensorMapVertices.push_back(
+            Vertex{entry.position.x, entry.position.y, 0.0F, 0.0F, 0.0F});
+    }
+}
+
+void Visualizer::updateVirtualSensorMapBuffer()
+{
+    if (m_virtualSensorMapVertices.empty())
+    {
+        return;
+    }
+
+    glBindBuffer(GL_ARRAY_BUFFER, m_mapVbo);
+    glBufferData(GL_ARRAY_BUFFER,
+                 static_cast<GLsizeiptr>(m_virtualSensorMapVertices.size() * sizeof(Vertex)),
+                 m_virtualSensorMapVertices.data(),
+                 GL_DYNAMIC_DRAW);
+}
+
+void Visualizer::configureVertexArray(GLuint vao, GLuint vbo)
+{
+    glBindVertexArray(vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_DYNAMIC_DRAW);
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(
+        0,
+        3,
+        GL_FLOAT,
+        GL_FALSE,
+        static_cast<GLsizei>(sizeof(Vertex)),
+        reinterpret_cast<void*>(offsetof(Vertex, x)));
+
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(
+        1,
+        1,
+        GL_FLOAT,
+        GL_FALSE,
+        static_cast<GLsizei>(sizeof(Vertex)),
+        reinterpret_cast<void*>(offsetof(Vertex, intensity)));
+
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(
+        2,
+        1,
+        GL_FLOAT,
+        GL_FALSE,
+        static_cast<GLsizei>(sizeof(Vertex)),
+        reinterpret_cast<void*>(offsetof(Vertex, classification)));
+
+    glBindVertexArray(0);
 }
 
 bool Visualizer::isGroundPoint(const lidar::LidarPoint& point) const noexcept
@@ -681,6 +1150,257 @@ void Visualizer::drawColorLegend()
             ImGui::Text("Intensity: 0.00 → %.2f", clip);
         }
     }
+}
+
+glm::vec2 Visualizer::directionFromAngle(float angle) const
+{
+    return glm::vec2(std::cos(angle), std::sin(angle));
+}
+
+std::vector<glm::vec2> Visualizer::buildSensorPolygon(
+    const mapping::LidarVirtualSensorMapping::SensorSnapshot& snapshot,
+    float nearRange,
+    float farRange) const
+{
+    const float normalizedNear = std::min(nearRange, farRange);
+    const float normalizedFar = std::max(nearRange, farRange);
+    if (normalizedFar <= 0.0F)
+    {
+        return {};
+    }
+
+    if (snapshot.isAngular)
+    {
+        const glm::vec2 lowerDir = directionFromAngle(snapshot.lowerAngle);
+        const glm::vec2 upperDir = directionFromAngle(snapshot.upperAngle);
+        const glm::vec2 nearLower = snapshot.reference + lowerDir * normalizedNear;
+        const glm::vec2 nearUpper = snapshot.reference + upperDir * normalizedNear;
+        const glm::vec2 farUpper = snapshot.reference + upperDir * normalizedFar;
+        const glm::vec2 farLower = snapshot.reference + lowerDir * normalizedFar;
+        return {nearLower, nearUpper, farUpper, farLower};
+    }
+
+    const glm::vec2 baseLower = snapshot.reference + glm::vec2(snapshot.orthMinX, 0.0F);
+    const glm::vec2 baseUpper = snapshot.reference + glm::vec2(snapshot.orthMaxX, 0.0F);
+    const float side = snapshot.orthSideSign != 0.0F ? snapshot.orthSideSign : 1.0F;
+    const glm::vec2 nearOffset(0.0F, side * normalizedNear);
+    const glm::vec2 farOffset(0.0F, side * normalizedFar);
+    return {baseLower + nearOffset, baseUpper + nearOffset, baseUpper + farOffset, baseLower + farOffset};
+}
+
+std::vector<glm::vec2> Visualizer::buildSensorMeasurementPolygon(
+    const mapping::LidarVirtualSensorMapping::SensorSnapshot& snapshot) const
+{
+    float farRange;
+    if (snapshot.isAngular)
+    {
+        farRange = glm::clamp(std::sqrt(snapshot.distanceSquared), 0.0F, kVirtualSensorMaxRange);
+    }
+    else
+    {
+        farRange = glm::clamp(std::abs(snapshot.position.y - snapshot.reference.y), 0.0F, kVirtualSensorMaxRange);
+    }
+    const float nearRange = std::max(farRange - kVirtualSensorThickness, 0.0F);
+    return buildSensorPolygon(snapshot, nearRange, farRange);
+}
+
+std::vector<glm::vec2> Visualizer::buildSensorShadowPolygon(
+    const mapping::LidarVirtualSensorMapping::SensorSnapshot& snapshot) const
+{
+    return buildSensorPolygon(snapshot, 0.0F, kVirtualSensorMaxRange);
+}
+
+void Visualizer::drawOverlayPolygon(const std::vector<glm::vec2>& positions,
+                                    const glm::vec3& color,
+                                    float alpha)
+{
+    if (positions.size() < 3)
+    {
+        return;
+    }
+
+    std::vector<Vertex> vertices;
+    vertices.reserve(positions.size());
+    for (const auto& position : positions)
+    {
+        vertices.push_back(Vertex{position.x, position.y, 0.0F, 0.0F, 0.0F});
+    }
+
+    glBindVertexArray(m_overlayVao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_overlayVbo);
+    glBufferData(GL_ARRAY_BUFFER,
+                 static_cast<GLsizeiptr>(vertices.size() * sizeof(Vertex)),
+                 vertices.data(),
+                 GL_DYNAMIC_DRAW);
+
+    applyForceColor(color, alpha);
+    glLineWidth(1.5F);
+    glDrawArrays(GL_LINE_LOOP, 0, static_cast<GLsizei>(vertices.size()));
+    resetForceColor();
+}
+
+void Visualizer::drawOverlayLine(const glm::vec2& from,
+                                 const glm::vec2& to,
+                                 const glm::vec3& color,
+                                 float alpha)
+{
+    Vertex vertices[2] = {
+        Vertex{from.x, from.y, 0.0F, 0.0F, 0.0F},
+        Vertex{to.x, to.y, 0.0F, 0.0F, 0.0F},
+    };
+
+    glBindVertexArray(m_overlayVao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_overlayVbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_DYNAMIC_DRAW);
+
+    applyForceColor(color, alpha);
+    glLineWidth(2.0F);
+    glDrawArrays(GL_LINES, 0, 2);
+    resetForceColor();
+}
+
+void Visualizer::drawLidarMountMarker(const glm::vec2& position, float rotationDegrees)
+{
+    const glm::vec3 markerColor(0.1F, 0.95F, 0.35F);
+    const float crossHalfSize = 0.3F;
+    drawOverlayLine(
+        glm::vec2(position.x - crossHalfSize, position.y),
+        glm::vec2(position.x + crossHalfSize, position.y),
+        markerColor,
+        0.8F);
+    drawOverlayLine(
+        glm::vec2(position.x, position.y - crossHalfSize),
+        glm::vec2(position.x, position.y + crossHalfSize),
+        markerColor,
+        0.8F);
+
+    const float orientationDegrees = m_lidarOrientationIsoDeg + rotationDegrees;
+    const float orientationRad = glm::radians(orientationDegrees);
+    const glm::vec2 direction(std::cos(orientationRad), std::sin(orientationRad));
+    const float arrowLength = 0.6F;
+    drawOverlayLine(position, position + direction * arrowLength, glm::vec3(1.0F, 0.85F, 0.05F), 0.9F);
+}
+
+void Visualizer::drawSensorPoint(const mapping::LidarVirtualSensorMapping::SensorSnapshot& snapshot,
+                                 const glm::vec3& color,
+                                 float alpha)
+{
+    Vertex vertex{snapshot.position.x, snapshot.position.y, 0.0F, 0.0F, 0.0F};
+    glBindVertexArray(m_overlayVao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_overlayVbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(Vertex), &vertex, GL_DYNAMIC_DRAW);
+
+    applyForceColor(color, alpha);
+    if (m_pointSizeLoc >= 0)
+    {
+        glUniform1f(m_pointSizeLoc, kVirtualSensorPointSize);
+    }
+    glDrawArrays(GL_POINTS, 0, 1);
+    resetForceColor();
+
+    if (m_pointSizeLoc >= 0)
+    {
+        glUniform1f(m_pointSizeLoc, m_worldFrameSettings.pointSize);
+    }
+}
+
+void Visualizer::applyForceColor(const glm::vec3& color, float alpha)
+{
+    if (m_forceColorLoc >= 0)
+    {
+        glUniform1i(m_forceColorLoc, GL_TRUE);
+    }
+    if (m_forcedColorLoc >= 0)
+    {
+        glUniform3f(m_forcedColorLoc, color.r, color.g, color.b);
+    }
+    if (m_forcedAlphaLoc >= 0)
+    {
+        glUniform1f(m_forcedAlphaLoc, alpha);
+    }
+}
+
+void Visualizer::resetForceColor()
+{
+    if (m_forceColorLoc >= 0)
+    {
+        glUniform1i(m_forceColorLoc, GL_FALSE);
+    }
+    if (m_forcedColorLoc >= 0)
+    {
+        glUniform3f(m_forcedColorLoc, 0.0F, 0.0F, 0.0F);
+    }
+    if (m_forcedAlphaLoc >= 0)
+    {
+        glUniform1f(m_forcedAlphaLoc, 1.0F);
+    }
+}
+
+void Visualizer::refreshVehicleProfiles()
+{
+    std::vector<std::string> entries;
+    if (fs::exists(kVehicleProfileDirectory) && fs::is_directory(kVehicleProfileDirectory))
+    {
+        for (const auto& entry : fs::directory_iterator(kVehicleProfileDirectory))
+        {
+            if (!entry.is_regular_file())
+            {
+                continue;
+            }
+
+            const auto filename = entry.path().filename().string();
+            if (!filename.starts_with(kVehicleProfilePrefix) ||
+                entry.path().extension() != ".ini")
+            {
+                continue;
+            }
+
+            entries.push_back(filename);
+        }
+    }
+
+    if (entries.empty())
+    {
+        entries.push_back(kDefaultVehicleProfileFilename);
+    }
+
+    std::sort(entries.begin(), entries.end());
+
+    const auto defaultIt = std::find(entries.begin(), entries.end(), kDefaultVehicleProfileFilename);
+    if (defaultIt != entries.end())
+    {
+        m_selectedVehicleProfileIndex = static_cast<int>(std::distance(entries.begin(), defaultIt));
+    }
+    else if (m_selectedVehicleProfileIndex >= static_cast<int>(entries.size()))
+    {
+        m_selectedVehicleProfileIndex = 0;
+    }
+
+    m_vehicleProfileEntries = std::move(entries);
+}
+
+void Visualizer::applyVehicleProfile(int index)
+{
+    if (m_vehicleProfileEntries.empty())
+    {
+        return;
+    }
+
+    const int clampedIndex =
+        std::clamp(index, 0, static_cast<int>(m_vehicleProfileEntries.size()) - 1);
+    m_selectedVehicleProfileIndex = clampedIndex;
+
+    const auto profilePath = kVehicleProfileDirectory / m_vehicleProfileEntries[clampedIndex];
+    m_currentVehicleProfile = loadVehicleProfile(profilePath);
+    m_vehicleContour = m_currentVehicleProfile.contour;
+    m_mountHeight = m_currentVehicleProfile.lidarHeightAboveGround;
+    m_floorHeight = -std::fabs(m_mountHeight);
+    m_virtualSensorMapping.setFloorHeight(m_floorHeight);
+    m_lidarVcsPosition = {
+        -m_currentVehicleProfile.lidarLatPos,
+        -m_currentVehicleProfile.lidarLonPos};
+    m_lidarOrientationIsoDeg = m_currentVehicleProfile.lidarOrientation;
+    m_lidarTranslation = m_lidarVcsPosition;
 }
 
 glm::vec3 Visualizer::sampleHeightColor(float normalized) const

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "sensors/BaseLidarSensor.hpp"
+#include "mapping/LidarVirtualSensorMapping.hpp"
 #include "visualization/Shader.hpp"
 
 #include <GL/glew.h>
@@ -10,13 +11,24 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <limits>
 #include <memory>
+#include <string>
 #include <vector>
 
 struct GLFWwindow;
 
 namespace visualization
 {
+struct VehicleProfileData
+{
+    std::vector<glm::vec2> contour;
+    float distRearAxle = 0.0F;
+    float lidarHeightAboveGround = 1.8F;
+    float lidarLatPos = 0.0F;
+    float lidarLonPos = 0.0F;
+    float lidarOrientation = 0.0F;
+};
 using BaseLidarSensor = lidar::BaseLidarSensor;
 
 class Visualizer
@@ -93,24 +105,51 @@ private:
         float replaySpeed = 1.0F;
         std::array<float, 3> groundPlaneColor = {0.1F, 0.7F, 0.1F};
         std::array<float, 3> nonGroundPlaneColor = {1.0F, 0.35F, 0.0F};
+        bool showVirtualSensorMap = false;
+        bool showVehicleContour = true;
+        std::array<float, 3> vehicleContourColor = {0.15F, 0.7F, 1.0F};
+        float vehicleContourTransparency = 0.65F;
+        float vehicleContourRotation = 0.0F;
     };
 
     void uploadBuffer();
     void cleanUp();
     void applyUniforms();
     void drawWorldControls();
+    void drawVirtualSensorMap();
+    void drawVirtualSensorsFancy();
+    void buildVirtualSensorMapVertices();
+    void updateVirtualSensorMapBuffer();
+    void configureVertexArray(GLuint vao, GLuint vbo);
     void drawColorLegend();
+    void drawLidarMountMarker(const glm::vec2& position, float rotationDegrees);
+    void drawOverlayLine(const glm::vec2& from, const glm::vec2& to, const glm::vec3& color, float alpha);
     bool isGroundPoint(const lidar::LidarPoint& point) const noexcept;
     void processCursorPos(double xpos, double ypos);
     void processScroll(double yoffset);
     void processMouseButton(int button, int action);
+    void refreshVehicleProfiles();
+    void applyVehicleProfile(int index);
     int zoneIndexFromHeight(float height) const noexcept;
     static void cursorPosCallback(GLFWwindow* window, double xpos, double ypos);
     static void scrollCallback(GLFWwindow* window, double xoffset, double yoffset);
     static void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods);
     glm::vec3 sampleHeightColor(float normalized) const;
     glm::vec3 sampleIntensityColor(float normalized) const;
-
+    glm::vec2 directionFromAngle(float angle) const;
+    std::vector<glm::vec2> buildSensorPolygon(const mapping::LidarVirtualSensorMapping::SensorSnapshot& snapshot,
+                                              float nearRange,
+                                              float farRange) const;
+    std::vector<glm::vec2> buildSensorMeasurementPolygon(
+        const mapping::LidarVirtualSensorMapping::SensorSnapshot& snapshot) const;
+    std::vector<glm::vec2> buildSensorShadowPolygon(
+        const mapping::LidarVirtualSensorMapping::SensorSnapshot& snapshot) const;
+    void drawOverlayPolygon(const std::vector<glm::vec2>& positions, const glm::vec3& color, float alpha);
+    void drawSensorPoint(const mapping::LidarVirtualSensorMapping::SensorSnapshot& snapshot,
+                         const glm::vec3& color,
+                         float alpha);
+    void applyForceColor(const glm::vec3& color, float alpha);
+    void resetForceColor();
     GLFWwindow* m_window = nullptr;
     GLuint m_vao = 0;
     GLuint m_vbo = 0;
@@ -123,9 +162,28 @@ private:
     float m_minHeight = 0.0F;
     float m_maxHeight = 1.0F;
     WorldFrameSettings m_worldFrameSettings;
+    std::vector<Vertex> m_virtualSensorMapVertices;
+    GLuint m_mapVao = 0;
+    GLuint m_mapVbo = 0;
+    GLuint m_overlayVao = 0;
+    GLuint m_overlayVbo = 0;
+    std::vector<glm::vec2> m_vehicleContour;
+    std::vector<std::string> m_vehicleProfileEntries;
+    int m_selectedVehicleProfileIndex = 0;
+    VehicleProfileData m_currentVehicleProfile;
+    glm::vec2 m_lidarVcsPosition = glm::vec2(0.0F);
+    float m_lidarOrientationIsoDeg = 0.0F;
+    glm::vec2 m_lidarTranslation = glm::vec2(0.0F);
     Camera m_camera;
     CameraMode m_cameraMode = CameraMode::FreeOrbit;
     int m_activeMouseButton = -1;
+    mapping::LidarVirtualSensorMapping m_virtualSensorMapping;
+    float m_mountHeight = 1.8F;
+    float m_floorHeight = -1.5F;
+    GLint m_forceColorLoc = -1;
+    GLint m_forcedColorLoc = -1;
+    GLint m_forcedAlphaLoc = -1;
+    GLint m_pointSizeLoc = -1;
 };
 
 } // namespace visualization

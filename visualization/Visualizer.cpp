@@ -54,6 +54,7 @@ constexpr float kDefaultMountHeight = 1.8F;
 constexpr float kVirtualSensorMaxRange = 7.0F;
 constexpr float kVirtualSensorThickness = 0.5F;
 constexpr float kVirtualSensorPointSize = 6.0F;
+constexpr float kGridHalfSpan = 50.0F;
 
 std::string_view trim(std::string_view value)
 {
@@ -184,6 +185,62 @@ VehicleProfileData loadVehicleProfile(const fs::path& profilePath)
                 if (parseFloat(rawValue, value))
                 {
                     profile.distRearAxle = value;
+                }
+            }
+            else if (rawKey == "height")
+            {
+                float value = 0.0F;
+                if (parseFloat(rawValue, value))
+                {
+                    profile.height = value;
+                }
+            }
+            else if (rawKey == "length")
+            {
+                float value = 0.0F;
+                if (parseFloat(rawValue, value))
+                {
+                    profile.length = value;
+                }
+            }
+            else if (rawKey == "trackFront")
+            {
+                float value = 0.0F;
+                if (parseFloat(rawValue, value))
+                {
+                    profile.trackFront = value;
+                }
+            }
+            else if (rawKey == "trackRear")
+            {
+                float value = 0.0F;
+                if (parseFloat(rawValue, value))
+                {
+                    profile.trackRear = value;
+                }
+            }
+            else if (rawKey == "wheelBase")
+            {
+                float value = 0.0F;
+                if (parseFloat(rawValue, value))
+                {
+                    profile.wheelBase = value;
+                }
+            }
+            else if (rawKey == "width")
+            {
+                float value = 0.0F;
+                if (parseFloat(rawValue, value))
+                {
+                    profile.width = value;
+                }
+            }
+            else if (rawKey == "widthIncludingMirrors")
+            {
+                float value = 0.0F;
+                if (parseFloat(rawValue, value))
+                {
+                    profile.widthIncludingMirrors = value;
                 }
             }
             continue;
@@ -326,17 +383,35 @@ void Visualizer::updatePoints(const BaseLidarSensor::PointCloud& points)
     nonGroundPoints.reserve(points.size());
 
     const bool useZoneColors = m_cameraMode == CameraMode::FreeOrbit;
+    m_closestContourDistance = std::numeric_limits<float>::max();
+    float cloudMinX = std::numeric_limits<float>::max();
+    float cloudMaxX = -std::numeric_limits<float>::max();
+    float cloudMinY = std::numeric_limits<float>::max();
+    float cloudMaxY = -std::numeric_limits<float>::max();
     for (const auto& point : points)
     {
+        // Shift LiDAR samples from the sensor frame back into the vehicle frame (front bumper origin).
+        const glm::vec2 translatedPosition{
+            point.x - m_lidarSensorOffset.x,
+            point.y - m_lidarSensorOffset.y};
         lidar::LidarPoint translatedPoint = point;
-        translatedPoint.x += m_lidarTranslation.x;
-        translatedPoint.y += m_lidarTranslation.y;
+        translatedPoint.x = translatedPosition.x;
+        translatedPoint.y = translatedPosition.y;
 
         const bool groundPoint = isGroundPoint(point);
         float classification = groundPoint ? 0.0F : 1.0F;
         if (useZoneColors)
         {
             classification = static_cast<float>(zoneIndexFromHeight(point.z));
+        }
+        if (!groundPoint && !m_translatedContour.empty())
+        {
+            const float contourDist = distanceToContour(translatedPosition);
+            if (contourDist < m_closestContourDistance)
+            {
+                m_closestContourDistance = contourDist;
+                m_closestContourPoint = translatedPosition;
+            }
         }
         Vertex vertex{
             translatedPoint.x,
@@ -358,6 +433,11 @@ void Visualizer::updatePoints(const BaseLidarSensor::PointCloud& points)
                 nonGroundPoints.push_back(translatedPoint);
             }
         }
+
+        cloudMinX = std::min(cloudMinX, translatedPoint.x);
+        cloudMaxX = std::max(cloudMaxX, translatedPoint.x);
+        cloudMinY = std::min(cloudMinY, translatedPoint.y);
+        cloudMaxY = std::max(cloudMaxY, translatedPoint.y);
     }
 
     m_virtualSensorMapping.updatePoints(nonGroundPoints);
@@ -388,6 +468,23 @@ void Visualizer::updatePoints(const BaseLidarSensor::PointCloud& points)
         {
             m_maxHeight = m_minHeight + 1e-3F;
         }
+    }
+
+    if (cloudMinX <= cloudMaxX && cloudMinY <= cloudMaxY)
+    {
+        const glm::vec2 defaultMin(-kGridHalfSpan);
+        const glm::vec2 defaultMax(kGridHalfSpan);
+        m_gridMin = glm::vec2(
+            std::min(cloudMinX, defaultMin.x),
+            std::min(cloudMinY, defaultMin.y));
+        m_gridMax = glm::vec2(
+            std::max(cloudMaxX, defaultMax.x),
+            std::max(cloudMaxY, defaultMax.y));
+    }
+    else
+    {
+        m_gridMin = glm::vec2(-kGridHalfSpan);
+        m_gridMax = glm::vec2(kGridHalfSpan);
     }
 
     uploadBuffer();
@@ -433,51 +530,75 @@ void Visualizer::render()
         glDepthMask(depthMask);
     }
 
+    if (m_worldFrameSettings.enableWorldVisualization)
+    {
+        drawGrid(m_gridSpacing);
+    }
+
     if (m_worldFrameSettings.enableWorldVisualization && m_worldFrameSettings.showVirtualSensorMap)
     {
         drawVirtualSensorsFancy();
         drawVirtualSensorMap();
     }
 
-    if (m_worldFrameSettings.enableWorldVisualization && m_worldFrameSettings.showVehicleContour &&
-        !m_vehicleContour.empty())
+    if (m_worldFrameSettings.enableWorldVisualization && m_worldFrameSettings.showVehicleContour)
     {
-        const float rotationDegrees = m_worldFrameSettings.vehicleContourRotation;
-        const float epsilon = 1e-3F;
-        const bool needsRotation = std::fabs(rotationDegrees) > epsilon;
-        const float rotationRadians = glm::radians(rotationDegrees);
-        const float cosValue = std::cos(rotationRadians);
-        const float sinValue = std::sin(rotationRadians);
-        auto rotatePoint = [&](const glm::vec2& value) -> glm::vec2 {
-            if (!needsRotation)
-            {
-                return value;
-            }
-            return glm::vec2(
-                cosValue * value.x - sinValue * value.y,
-                sinValue * value.x + cosValue * value.y);
-        };
-
-        std::vector<glm::vec2> rotatedContour;
-        const std::vector<glm::vec2>* contourToDraw = &m_vehicleContour;
-        if (needsRotation)
+        const std::vector<glm::vec2>* baseContour = m_translatedContour.empty() ? &m_vehicleContour : &m_translatedContour;
+        if (!baseContour->empty())
         {
-            rotatedContour.reserve(m_vehicleContour.size());
-            for (const auto& point : m_vehicleContour)
+            const float rotationDegrees = m_worldFrameSettings.vehicleContourRotation;
+            const float epsilon = 1e-3F;
+            const bool needsRotation = std::fabs(rotationDegrees) > epsilon;
+            const float rotationRadians = glm::radians(rotationDegrees);
+            const float cosValue = std::cos(rotationRadians);
+            const float sinValue = std::sin(rotationRadians);
+            auto rotatePoint = [&](const glm::vec2& value) -> glm::vec2 {
+                if (!needsRotation)
+                {
+                    return value;
+                }
+                return glm::vec2(
+                    cosValue * value.x - sinValue * value.y,
+                    sinValue * value.x + cosValue * value.y);
+            };
+
+            std::vector<glm::vec2> rotatedContour;
+            const std::vector<glm::vec2>* contourToDraw = baseContour;
+            if (needsRotation)
             {
-                rotatedContour.push_back(rotatePoint(point));
+                rotatedContour.reserve(baseContour->size());
+                for (const auto& point : *baseContour)
+                {
+                    rotatedContour.push_back(rotatePoint(point));
+                }
+                contourToDraw = &rotatedContour;
             }
-            contourToDraw = &rotatedContour;
+
+            const auto& color = m_worldFrameSettings.vehicleContourColor;
+            drawOverlayPolygon(
+                *contourToDraw,
+                glm::vec3(color[0], color[1], color[2]),
+                m_worldFrameSettings.vehicleContourTransparency);
+
+            const glm::vec2 rotatedLidarPosition = rotatePoint(m_lidarVcsPosition);
+            drawLidarMountMarker(rotatedLidarPosition, rotationDegrees);
+            if (m_closestContourDistance < std::numeric_limits<float>::max())
+            {
+                const glm::vec2 rotatedClosest = rotatePoint(m_closestContourPoint);
+                const float crossSize = 0.3F;
+                const glm::vec3 closeColor(1.0F, 0.25F, 0.25F);
+                drawOverlayLine(
+                    glm::vec2(rotatedClosest.x - crossSize, rotatedClosest.y),
+                    glm::vec2(rotatedClosest.x + crossSize, rotatedClosest.y),
+                    closeColor,
+                    0.85F);
+                drawOverlayLine(
+                    glm::vec2(rotatedClosest.x, rotatedClosest.y - crossSize),
+                    glm::vec2(rotatedClosest.x, rotatedClosest.y + crossSize),
+                    closeColor,
+                    0.85F);
+            }
         }
-
-        const auto& color = m_worldFrameSettings.vehicleContourColor;
-        drawOverlayPolygon(
-            *contourToDraw,
-            glm::vec3(color[0], color[1], color[2]),
-            m_worldFrameSettings.vehicleContourTransparency);
-
-        const glm::vec2 rotatedLidarPosition = rotatePoint(m_lidarVcsPosition);
-        drawLidarMountMarker(rotatedLidarPosition, rotationDegrees);
     }
 
     ImGui_ImplOpenGL3_NewFrame();
@@ -713,8 +834,8 @@ void Visualizer::drawWorldControls()
                     &m_vehicleProfileEntries,
                     static_cast<int>(m_vehicleProfileEntries.size())))
             {
-                applyVehicleProfile(profileIdx);
-            }
+    applyVehicleProfile(profileIdx);
+}
         }
         if (m_worldFrameSettings.showVehicleContour)
         {
@@ -737,6 +858,7 @@ void Visualizer::drawWorldControls()
         ImGui::Separator();
 
         ImGui::SliderFloat("Point size", &m_worldFrameSettings.pointSize, 1.0F, 6.0F);
+        ImGui::SliderFloat("Bin size (m)", &m_gridSpacing, 10.0F, 100.0F, "%.0f");
 
         int cameraModeIdx = static_cast<int>(m_cameraMode);
         if (ImGui::Combo(
@@ -1304,6 +1426,29 @@ void Visualizer::drawSensorPoint(const mapping::LidarVirtualSensorMapping::Senso
     }
 }
 
+void Visualizer::drawGrid(float spacing)
+{
+    const float gridSpacing = std::max(0.01F, spacing);
+    const glm::vec2 minBounds = m_gridMin;
+    const glm::vec2 maxBounds = m_gridMax;
+    const float startX = std::floor(minBounds.x / gridSpacing) * gridSpacing;
+    const float endX = std::ceil(maxBounds.x / gridSpacing) * gridSpacing;
+    const float startY = std::floor(minBounds.y / gridSpacing) * gridSpacing;
+    const float endY = std::ceil(maxBounds.y / gridSpacing) * gridSpacing;
+
+    const glm::vec3 gridColor(0.35F, 0.35F, 0.35F);
+    const float alpha = 0.2F;
+
+    for (float x = startX; x <= endX; x += gridSpacing)
+    {
+        drawOverlayLine(glm::vec2(x, startY), glm::vec2(x, endY), gridColor, alpha);
+    }
+    for (float y = startY; y <= endY; y += gridSpacing)
+    {
+        drawOverlayLine(glm::vec2(startX, y), glm::vec2(endX, y), gridColor, alpha);
+    }
+}
+
 void Visualizer::applyForceColor(const glm::vec3& color, float alpha)
 {
     if (m_forceColorLoc >= 0)
@@ -1334,6 +1479,72 @@ void Visualizer::resetForceColor()
     {
         glUniform1f(m_forcedAlphaLoc, 1.0F);
     }
+}
+
+void Visualizer::updateContourTranslation()
+{
+    m_translatedContour.clear();
+    m_translatedContour.reserve(m_vehicleContour.size());
+    for (const auto& point : m_vehicleContour)
+    {
+        m_translatedContour.push_back(point + m_contourTranslation);
+    }
+    updateSensorOffsets();
+}
+
+void Visualizer::updateSensorOffsets()
+{
+    if (m_translatedContour.empty())
+    {
+        return;
+    }
+
+    float minY = std::numeric_limits<float>::max();
+    float maxY = -std::numeric_limits<float>::max();
+    for (const auto& point : m_translatedContour)
+    {
+        minY = std::min(minY, point.y);
+        maxY = std::max(maxY, point.y);
+    }
+
+    if (minY >= maxY)
+    {
+        return;
+    }
+
+    m_virtualSensorMapping.setOffsets(maxY, minY);
+}
+
+float Visualizer::distanceToContour(const glm::vec2& point) const
+{
+    if (m_translatedContour.size() < 2)
+    {
+        return std::numeric_limits<float>::max();
+    }
+
+    float best = std::numeric_limits<float>::max();
+    for (std::size_t idx = 0; idx < m_translatedContour.size(); ++idx)
+    {
+        const auto& start = m_translatedContour[idx];
+        const auto& end = m_translatedContour[(idx + 1) % m_translatedContour.size()];
+        best = std::min(best, distanceToSegment(start, end, point));
+    }
+    return best;
+}
+
+float Visualizer::distanceToSegment(const glm::vec2& a, const glm::vec2& b, const glm::vec2& point) const
+{
+    const glm::vec2 ab = b - a;
+    const float abSquared = glm::dot(ab, ab);
+    if (abSquared < 1e-6F)
+    {
+        return glm::length(point - a);
+    }
+
+    float t = glm::dot(point - a, ab) / abSquared;
+    t = std::clamp(t, 0.0F, 1.0F);
+    const glm::vec2 projection = a + ab * t;
+    return glm::length(point - projection);
 }
 
 void Visualizer::refreshVehicleProfiles()
@@ -1396,11 +1607,13 @@ void Visualizer::applyVehicleProfile(int index)
     m_mountHeight = m_currentVehicleProfile.lidarHeightAboveGround;
     m_floorHeight = -std::fabs(m_mountHeight);
     m_virtualSensorMapping.setFloorHeight(m_floorHeight);
-    m_lidarVcsPosition = {
-        -m_currentVehicleProfile.lidarLatPos,
-        -m_currentVehicleProfile.lidarLonPos};
+    m_lidarSensorOffset = {
+        m_currentVehicleProfile.lidarLatPos,
+        -m_currentVehicleProfile.lidarLonPos - m_currentVehicleProfile.distRearAxle};
+    m_lidarVcsPosition = -m_lidarSensorOffset;
     m_lidarOrientationIsoDeg = m_currentVehicleProfile.lidarOrientation;
-    m_lidarTranslation = m_lidarVcsPosition;
+    m_contourTranslation = glm::vec2(0.0F, 0.0F);
+    updateContourTranslation();
 }
 
 glm::vec3 Visualizer::sampleHeightColor(float normalized) const

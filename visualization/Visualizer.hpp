@@ -28,6 +28,13 @@ struct VehicleProfileData
     float lidarLatPos = 0.0F;
     float lidarLonPos = 0.0F;
     float lidarOrientation = 0.0F;
+    float height = 0.0F;
+    float length = 0.0F;
+    float trackFront = 0.0F;
+    float trackRear = 0.0F;
+    float wheelBase = 0.0F;
+    float width = 0.0F;
+    float widthIncludingMirrors = 0.0F;
 };
 using BaseLidarSensor = lidar::BaseLidarSensor;
 
@@ -130,6 +137,7 @@ private:
     void processMouseButton(int button, int action);
     void refreshVehicleProfiles();
     void applyVehicleProfile(int index);
+    void drawGrid(float spacing = 0.5F);
     int zoneIndexFromHeight(float height) const noexcept;
     static void cursorPosCallback(GLFWwindow* window, double xpos, double ypos);
     static void scrollCallback(GLFWwindow* window, double xoffset, double yoffset);
@@ -150,6 +158,10 @@ private:
                          float alpha);
     void applyForceColor(const glm::vec3& color, float alpha);
     void resetForceColor();
+    void updateContourTranslation();
+    void updateSensorOffsets();
+    float distanceToContour(const glm::vec2& point) const;
+    float distanceToSegment(const glm::vec2& a, const glm::vec2& b, const glm::vec2& point) const;
     GLFWwindow* m_window = nullptr;
     GLuint m_vao = 0;
     GLuint m_vbo = 0;
@@ -173,7 +185,11 @@ private:
     VehicleProfileData m_currentVehicleProfile;
     glm::vec2 m_lidarVcsPosition = glm::vec2(0.0F);
     float m_lidarOrientationIsoDeg = 0.0F;
-    glm::vec2 m_lidarTranslation = glm::vec2(0.0F);
+    glm::vec2 m_contourTranslation = glm::vec2(0.0F);
+    glm::vec2 m_lidarSensorOffset = glm::vec2(0.0F); // (latPos, lonPos) plus rear-axle distance
+    std::vector<glm::vec2> m_translatedContour;
+    glm::vec2 m_closestContourPoint = glm::vec2(0.0F);
+    float m_closestContourDistance = std::numeric_limits<float>::max();
     Camera m_camera;
     CameraMode m_cameraMode = CameraMode::FreeOrbit;
     int m_activeMouseButton = -1;
@@ -184,6 +200,9 @@ private:
     GLint m_forcedColorLoc = -1;
     GLint m_forcedAlphaLoc = -1;
     GLint m_pointSizeLoc = -1;
+    glm::vec2 m_gridMin = glm::vec2(-5.0F);
+    glm::vec2 m_gridMax = glm::vec2(5.0F);
+    float m_gridSpacing = 10.0F;
 };
 
 } // namespace visualization

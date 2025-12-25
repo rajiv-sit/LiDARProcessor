@@ -16,6 +16,9 @@ uniform float uGroundPlaneAlpha;
 uniform float uNonGroundPlaneAlpha;
 uniform vec3 uZoneColors[5];
 uniform bool uUseZoneColors;
+uniform bool uForceColor;
+uniform vec3 uForcedColor;
+uniform float uForcedAlpha;
 
 vec3 evaluateHeightColor(float normalizedHeight)
 {
@@ -85,5 +88,10 @@ void main()
     }
 
     float alpha = computeAlpha(normalizedIntensity, uColorMode, uUseZoneColors);
+    if (uForceColor)
+    {
+        color = uForcedColor;
+        alpha = uForcedAlpha;
+    }
     FragColor = vec4(color, alpha);
 }

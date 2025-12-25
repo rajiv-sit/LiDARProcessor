@@ -9,12 +9,14 @@ flat out float vClassification;
 
 uniform mat4 uViewProjection;
 
+uniform float uPointSize;
+
 void main()
 {
     vec4 worldPos = vec4(aPosition * 0.01, 1.0);
     vHeight = worldPos.z;
     vIntensity = aIntensity;
     vClassification = aClassification;
-    gl_PointSize = 3.0;
+    gl_PointSize = uPointSize;
     gl_Position = uViewProjection * worldPos;
 }

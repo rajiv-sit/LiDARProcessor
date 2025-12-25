@@ -16,6 +16,7 @@ set(LIDAR_SOURCES
     velodyne/src/sensors/VelodyneLidar.cpp
     visualization/Shader.cpp
     visualization/Visualizer.cpp
+    mapping/LidarVirtualSensorMapping.cpp
     reader/src/VelodynePCAPReader.cpp
     bindings/imgui_impl_glfw.cpp
     bindings/imgui_impl_opengl3.cpp

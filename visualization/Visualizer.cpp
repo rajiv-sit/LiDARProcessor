@@ -1612,9 +1612,7 @@ void Visualizer::applyVehicleProfile(int index)
         -m_currentVehicleProfile.lidarLonPos - m_currentVehicleProfile.distRearAxle};
     m_lidarVcsPosition = -m_lidarSensorOffset;
     m_lidarOrientationIsoDeg = m_currentVehicleProfile.lidarOrientation;
-    m_contourTranslation = glm::vec2(
-        m_currentVehicleProfile.lidarLatPos,
-        -m_currentVehicleProfile.lidarLonPos - m_currentVehicleProfile.distRearAxle);
+    m_contourTranslation = glm::vec2(0.0F,0.0F);
     updateContourTranslation();
 }
 

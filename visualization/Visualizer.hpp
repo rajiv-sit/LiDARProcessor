@@ -73,7 +73,7 @@ private:
 
     struct Camera
     {
-        float distance = 15.0F;
+        float distance = 30.0F;
         float yaw = 90.0F;
         float pitch = -25.0F;
         float fov = 45.0F;

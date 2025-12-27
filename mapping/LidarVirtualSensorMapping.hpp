@@ -25,6 +25,8 @@ public:
     void setVehicleContour(const std::vector<glm::vec2>& contour);
 
     const std::vector<glm::vec2>& hull() const noexcept;
+    const std::vector<glm::vec2>& groundHull() const noexcept;
+    const std::vector<glm::vec2>& nonGroundHull() const noexcept;
 
     struct SensorSnapshot
     {
@@ -74,7 +76,9 @@ private:
 
     std::array<SensorDefinition, kVirtualSensorCount> m_sensorDefinitions{};
     std::array<SensorSample, kVirtualSensorCount> m_sensorSamples{};
-    std::vector<glm::vec2> m_hull;
+    std::array<SensorSample, kVirtualSensorCount> m_sensorSamplesGround{};
+    std::vector<glm::vec2> m_hullNonGround;
+    std::vector<glm::vec2> m_hullGround;
     glm::vec2 m_vehicleCenter = glm::vec2(0.0F);
     float m_vehicleRadius = 0.0F;
     float m_floorHeight;

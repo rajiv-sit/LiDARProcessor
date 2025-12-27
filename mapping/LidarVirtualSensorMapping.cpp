@@ -34,14 +34,11 @@ void LidarVirtualSensorMapping::updatePoints(
 
     for (const auto& point : points)
     {
-        if (point.z < m_floorHeight)
-        {
-            continue;
-        }
-
+        const bool groundPoint = point.z < m_floorHeight;
         const glm::vec2 position(point.x, point.y);
         const float distanceSquared = glm::dot(position, position);
 
+        auto& samples = groundPoint ? m_sensorSamplesGround : m_sensorSamples;
         for (std::size_t sensorIndex = 0; sensorIndex < kVirtualSensorCount; ++sensorIndex)
         {
             const auto& sensor = m_sensorDefinitions[sensorIndex];
@@ -50,7 +47,7 @@ void LidarVirtualSensorMapping::updatePoints(
                 continue;
             }
 
-            auto& sample = m_sensorSamples[sensorIndex];
+            auto& sample = samples[sensorIndex];
             if (distanceSquared < sample.distanceSquared)
             {
                 sample.distanceSquared = distanceSquared;
@@ -60,12 +57,21 @@ void LidarVirtualSensorMapping::updatePoints(
         }
     }
 
-    m_hull.clear();
+    m_hullNonGround.clear();
     for (const auto& sample : m_sensorSamples)
     {
         if (sample.valid)
         {
-            m_hull.push_back(sample.position);
+            m_hullNonGround.push_back(sample.position);
+        }
+    }
+
+    m_hullGround.clear();
+    for (const auto& sample : m_sensorSamplesGround)
+    {
+        if (sample.valid)
+        {
+            m_hullGround.push_back(sample.position);
         }
     }
 }
@@ -107,7 +113,17 @@ void LidarVirtualSensorMapping::setVehicleContour(const std::vector<glm::vec2>& 
 
 const std::vector<glm::vec2>& LidarVirtualSensorMapping::hull() const noexcept
 {
-    return m_hull;
+    return m_hullNonGround;
+}
+
+const std::vector<glm::vec2>& LidarVirtualSensorMapping::groundHull() const noexcept
+{
+    return m_hullGround;
+}
+
+const std::vector<glm::vec2>& LidarVirtualSensorMapping::nonGroundHull() const noexcept
+{
+    return m_hullNonGround;
 }
 
 std::array<LidarVirtualSensorMapping::SensorSnapshot, LidarVirtualSensorMapping::kVirtualSensorCount>
@@ -140,7 +156,9 @@ void LidarVirtualSensorMapping::rebuild()
 {
     std::fill(m_sensorDefinitions.begin(), m_sensorDefinitions.end(), SensorDefinition{});
     std::fill(m_sensorSamples.begin(), m_sensorSamples.end(), SensorSample{});
-    m_hull.clear();
+    std::fill(m_sensorSamplesGround.begin(), m_sensorSamplesGround.end(), SensorSample{});
+    m_hullNonGround.clear();
+    m_hullGround.clear();
 
     const float delta = glm::two_pi<float>() / static_cast<float>(kNumAngularSensors);
     float theta = 0.0F;
@@ -164,6 +182,12 @@ void LidarVirtualSensorMapping::rebuild()
 void LidarVirtualSensorMapping::resetSamples()
 {
     for (auto& sample : m_sensorSamples)
+    {
+        sample.valid = false;
+        sample.distanceSquared = std::numeric_limits<float>::max();
+        sample.position = glm::vec2(0.0F);
+    }
+    for (auto& sample : m_sensorSamplesGround)
     {
         sample.valid = false;
         sample.distanceSquared = std::numeric_limits<float>::max();

@@ -1050,6 +1050,12 @@ void Visualizer::drawVirtualSensorsFancy()
     }
 
     glDepthMask(depthMask);
+
+    const auto& groundHull = m_virtualSensorMapping.groundHull();
+    if (groundHull.size() >= 3)
+    {
+        drawOverlayPolygon(groundHull, glm::vec3(0.3F, 0.5F, 1.0F), 0.45F);
+    }
 }
 
 void Visualizer::buildVirtualSensorMapVertices()
@@ -1060,7 +1066,7 @@ void Visualizer::buildVirtualSensorMapVertices()
         glm::vec2 position;
     };
 
-    const auto& hull = m_virtualSensorMapping.hull();
+    const auto& hull = m_virtualSensorMapping.nonGroundHull();
     if (hull.size() < 3)
     {
         m_virtualSensorMapVertices.clear();

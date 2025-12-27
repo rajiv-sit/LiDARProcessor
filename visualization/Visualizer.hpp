@@ -113,6 +113,7 @@ private:
         std::array<float, 3> groundPlaneColor = {0.1F, 0.7F, 0.1F};
         std::array<float, 3> nonGroundPlaneColor = {1.0F, 0.35F, 0.0F};
         bool showVirtualSensorMap = false;
+        bool showFreeSpaceMap = false;
         bool showVehicleContour = true;
         std::array<float, 3> vehicleContourColor = {0.15F, 0.7F, 1.0F};
         float vehicleContourTransparency = 0.65F;
@@ -124,6 +125,7 @@ private:
     void applyUniforms();
     void drawWorldControls();
     void drawVirtualSensorsFancy();
+    void drawFreeSpaceMap();
     void configureVertexArray(GLuint vao, GLuint vbo);
     void drawColorLegend();
     void drawLidarMountMarker(const glm::vec2& position, float rotationDegrees);

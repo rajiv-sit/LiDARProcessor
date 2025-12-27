@@ -566,6 +566,10 @@ void Visualizer::render()
     if (m_worldFrameSettings.enableWorldVisualization && m_worldFrameSettings.showVirtualSensorMap)
     {
         drawVirtualSensorsFancy();
+        if (m_worldFrameSettings.showFreeSpaceMap)
+        {
+            drawFreeSpaceMap();
+        }
     }
 
     if (m_worldFrameSettings.enableWorldVisualization && m_worldFrameSettings.showVehicleContour)
@@ -669,6 +673,31 @@ void Visualizer::uploadBuffer()
     else
     {
         glBufferSubData(GL_ARRAY_BUFFER, 0, byteCount, m_vertexBuffer.data());
+    }
+}
+
+void Visualizer::drawFreeSpaceMap()
+{
+    const auto snapshots = m_virtualSensorMapping.snapshots();
+    if (snapshots.empty())
+    {
+        return;
+    }
+
+    const glm::vec3 measuredColor(1.0F, 0.25F, 0.65F);
+    const glm::vec3 missingColor(0.55F, 0.15F, 0.85F);
+    for (const auto& snapshot : snapshots)
+    {
+        const auto polygon =
+            snapshot.valid ? buildSensorMeasurementPolygon(snapshot) : buildSensorShadowPolygon(snapshot);
+        if (polygon.size() < 3)
+        {
+            continue;
+        }
+
+        const glm::vec3& color = snapshot.valid ? measuredColor : missingColor;
+        const float alpha = snapshot.valid ? 0.25F : 0.12F;
+        drawOverlayPolygon(polygon, color, alpha);
     }
 }
 
@@ -838,6 +867,7 @@ void Visualizer::drawWorldControls()
     {
         ImGui::Checkbox("Enable visualization", &m_worldFrameSettings.enableWorldVisualization);
         ImGui::Checkbox("Show virtual sensor map", &m_worldFrameSettings.showVirtualSensorMap);
+        ImGui::Checkbox("Show free-space map", &m_worldFrameSettings.showFreeSpaceMap);
         ImGui::Checkbox("Show vehicle contour", &m_worldFrameSettings.showVehicleContour);
         if (!m_vehicleProfileEntries.empty())
         {

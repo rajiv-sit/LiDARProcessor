@@ -8,6 +8,7 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <imgui_impl_glfw.hpp>
 #include <imgui_impl_opengl3.hpp>
+#include <bsplinebuilder.h>
 
 #include <algorithm>
 #include <array>
@@ -88,6 +89,8 @@ constexpr float kVirtualSensorThickness = 0.5F;
 constexpr float kVirtualSensorPointSize = 6.0F;
 constexpr float kGridHalfSpan = 50.0F;
 constexpr glm::vec2 kContourExpansion(0.1F, 0.1F);
+constexpr std::size_t kFreeSpaceSplineSampleCount = 192;
+constexpr std::size_t kFreeSpaceSectorSubdivisions = 10;
 
 std::string_view trim(std::string_view value)
 {
@@ -475,6 +478,7 @@ void Visualizer::updatePoints(const BaseLidarSensor::PointCloud& points)
     }
 
     m_virtualSensorMapping.updatePoints(nonGroundPoints);
+    m_freeSpaceBoundary = buildFreeSpaceBoundary();
 
     m_groundPointCount = ground.size();
     m_nonGroundPointCount = nonGround.size();
@@ -576,6 +580,10 @@ void Visualizer::render()
     if (m_worldFrameSettings.enableWorldVisualization && m_worldFrameSettings.showFreeSpaceMap)
     {
         drawFreeSpaceMap();
+    }
+    if (m_worldFrameSettings.enableWorldVisualization && m_worldFrameSettings.showBsplineFreeSpaceMap)
+    {
+        drawBsplineFreeSpaceMap();
     }
 
     if (m_worldFrameSettings.enableWorldVisualization && m_worldFrameSettings.showVehicleContour)
@@ -718,6 +726,177 @@ void Visualizer::drawFreeSpaceMap()
             drawOverlayLine(polygon[2], polygon[3], color, 0.9F);
         }
     }
+}
+
+void Visualizer::drawBsplineFreeSpaceMap()
+{
+    if (m_freeSpaceBoundary.size() < 3)
+    {
+        return;
+    }
+
+    const glm::vec3 freespaceColor(0.2F, 0.6F, 1.0F);
+    drawOverlayPolygon(m_freeSpaceBoundary, freespaceColor, 0.45F);
+}
+
+std::vector<glm::vec2> Visualizer::buildFreeSpaceBoundary() const
+{
+    const auto snapshots = m_virtualSensorMapping.snapshots();
+    if (snapshots.size() < 3)
+    {
+        return {};
+    }
+
+    std::vector<glm::vec2> basePoints;
+    basePoints.reserve(snapshots.size() * kFreeSpaceSectorSubdivisions);
+    const float twoPi = glm::two_pi<float>();
+    for (const auto& snapshot : snapshots)
+    {
+        float startAngle = snapshot.lowerAngle;
+        float endAngle = snapshot.upperAngle;
+        if (snapshot.wrapAround && endAngle < startAngle)
+        {
+            endAngle += twoPi;
+        }
+
+        float sectorSpan = endAngle - startAngle;
+        if (sectorSpan <= 1e-4F)
+        {
+            sectorSpan = twoPi / static_cast<float>(mapping::LidarVirtualSensorMapping::kNumAngularSensors);
+        }
+
+        float radius = kVirtualSensorMaxRange;
+        if (snapshot.valid)
+        {
+            radius = glm::clamp(std::sqrt(snapshot.distanceSquared), 0.0F, kVirtualSensorMaxRange);
+        }
+
+        for (std::size_t subdiv = 0; subdiv < kFreeSpaceSectorSubdivisions; ++subdiv)
+        {
+            const float t = (static_cast<float>(subdiv) + 0.5F) / static_cast<float>(kFreeSpaceSectorSubdivisions);
+            float angle = startAngle + t * sectorSpan;
+            angle = std::fmod(angle, twoPi);
+            if (angle < 0.0F)
+            {
+                angle += twoPi;
+            }
+
+            const glm::vec2 direction = directionFromAngle(angle);
+            basePoints.push_back(snapshot.reference + direction * radius);
+        }
+    }
+
+    if (basePoints.size() < 3)
+    {
+        return basePoints;
+    }
+
+    try
+    {
+        std::vector<double> parameters(basePoints.size());
+        std::vector<double> xs(basePoints.size());
+        std::vector<double> ys(basePoints.size());
+        for (std::size_t i = 0; i < basePoints.size(); ++i)
+        {
+            parameters[i] = static_cast<double>(i);
+            xs[i] = basePoints[i].x;
+            ys[i] = basePoints[i].y;
+        }
+
+        const auto smoothedX = sampleBspline(parameters, xs, kFreeSpaceSplineSampleCount);
+        const auto smoothedY = sampleBspline(parameters, ys, kFreeSpaceSplineSampleCount);
+
+        if (smoothedX.size() != smoothedY.size() || smoothedX.empty())
+        {
+            return basePoints;
+        }
+
+        std::vector<glm::vec2> result;
+        result.reserve(smoothedX.size());
+        for (std::size_t i = 0; i < smoothedX.size(); ++i)
+        {
+            result.emplace_back(static_cast<float>(smoothedX[i]), static_cast<float>(smoothedY[i]));
+        }
+        return result;
+    }
+    catch (const SPLINTER::Exception&)
+    {
+        return basePoints;
+    }
+    catch (...)
+    {
+        return basePoints;
+    }
+}
+
+float Visualizer::snapshotMidAngle(const mapping::LidarVirtualSensorMapping::SensorSnapshot& snapshot) const
+{
+    float lower = snapshot.lowerAngle;
+    float upper = snapshot.upperAngle;
+    if (snapshot.wrapAround && upper < lower)
+    {
+        upper += glm::two_pi<float>();
+    }
+
+    float midAngle = 0.5F * (lower + upper);
+    const float twoPi = glm::two_pi<float>();
+    if (midAngle >= twoPi)
+    {
+        midAngle -= twoPi;
+    }
+    return midAngle;
+}
+
+std::vector<double> Visualizer::sampleBspline(const std::vector<double>& parameters,
+                                              const std::vector<double>& values,
+                                              std::size_t resolution) const
+{
+    if (parameters.size() != values.size() || parameters.empty() || resolution == 0)
+    {
+        return {};
+    }
+
+    SPLINTER::DataTable data;
+    for (std::size_t i = 0; i < parameters.size(); ++i)
+    {
+        data.addSample(std::vector<double>{parameters[i]}, values[i]);
+    }
+
+    SPLINTER::BSpline::Builder builder(data);
+    const unsigned int desiredOrder = std::max<unsigned int>(
+        3U,
+        std::min<unsigned int>(static_cast<unsigned int>(parameters.size() / 16U) + 3U, 5U));
+    builder.degree(desiredOrder);
+
+    const unsigned int maxBasis = std::clamp(
+        static_cast<unsigned int>(parameters.size() * 10U),
+        desiredOrder + 1U,
+        1024U);
+    builder.numBasisFunctions(std::vector<unsigned int>{maxBasis});
+
+    builder.knotSpacing(SPLINTER::BSpline::KnotSpacing::AS_SAMPLED);
+    builder.smoothing(SPLINTER::BSpline::Smoothing::PSPLINE);
+
+    const auto bspline = builder.build();
+    const double lower = bspline.getDomainLowerBound()[0];
+    const double upper = bspline.getDomainUpperBound()[0];
+    if (upper <= lower)
+    {
+        return std::vector<double>(1, values.front());
+    }
+
+    std::vector<double> smoothed;
+    smoothed.reserve(resolution + 1);
+    for (std::size_t step = 0; step <= resolution; ++step)
+    {
+        const double factor = static_cast<double>(step) / static_cast<double>(resolution);
+        const double t = lower + (upper - lower) * factor;
+        SPLINTER::DenseVector argument(1);
+        argument(0) = t;
+        smoothed.push_back(bspline.eval(argument));
+    }
+
+    return smoothed;
 }
 
 void Visualizer::cleanUp()
@@ -887,6 +1066,9 @@ void Visualizer::drawWorldControls()
         ImGui::Checkbox("Enable visualization", &m_worldFrameSettings.enableWorldVisualization);
         ImGui::Checkbox("Show virtual sensor map", &m_worldFrameSettings.showVirtualSensorMap);
         ImGui::Checkbox("Show free-space map", &m_worldFrameSettings.showFreeSpaceMap);
+        ImGui::Checkbox(
+            "Show B-spline freespace map",
+            &m_worldFrameSettings.showBsplineFreeSpaceMap);
         ImGui::Checkbox("Show vehicle contour", &m_worldFrameSettings.showVehicleContour);
         if (!m_vehicleProfileEntries.empty())
         {

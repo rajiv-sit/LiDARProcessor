@@ -73,7 +73,7 @@ private:
 
     struct Camera
     {
-        float distance = 30.0F;
+        float distance = 0.5F;
         float yaw = 90.0F;
         float pitch = -25.0F;
         float fov = 45.0F;
@@ -108,12 +108,13 @@ private:
         float commonTransparency = 0.65F;
         float groundPlaneTransparency = 0.75F;
         float nongroundPlaneTransparency = 0.9F;
-        float groundClassificationHeight = 0.15F;
-        float replaySpeed = 1.0F;
+        float groundClassificationHeight = -1.208F;
+        float replaySpeed = 0.1F;
         std::array<float, 3> groundPlaneColor = {0.1F, 0.7F, 0.1F};
         std::array<float, 3> nonGroundPlaneColor = {1.0F, 0.35F, 0.0F};
         bool showVirtualSensorMap = false;
         bool showFreeSpaceMap = false;
+        bool showBsplineFreeSpaceMap = false;
         bool showVehicleContour = true;
         std::array<float, 3> vehicleContourColor = {0.15F, 0.7F, 1.0F};
         float vehicleContourTransparency = 0.65F;
@@ -126,6 +127,7 @@ private:
     void drawWorldControls();
     void drawVirtualSensorsFancy();
     void drawFreeSpaceMap();
+    void drawBsplineFreeSpaceMap();
     void configureVertexArray(GLuint vao, GLuint vbo);
     void drawColorLegend();
     void drawLidarMountMarker(const glm::vec2& position, float rotationDegrees);
@@ -155,13 +157,18 @@ private:
         const mapping::LidarVirtualSensorMapping::SensorSnapshot& snapshot) const;
     std::vector<glm::vec2> buildSensorShadowPolygon(
         const mapping::LidarVirtualSensorMapping::SensorSnapshot& snapshot) const;
-    std::vector<glm::vec2> buildFreeSpacePolygon(
-        const mapping::LidarVirtualSensorMapping::SensorSnapshot& snapshot,
-        float farRange) const;
     void drawOverlayPolygon(const std::vector<glm::vec2>& positions, const glm::vec3& color, float alpha);
     void drawSensorPoint(const mapping::LidarVirtualSensorMapping::SensorSnapshot& snapshot,
                          const glm::vec3& color,
                          float alpha);
+    std::vector<glm::vec2> buildFreeSpaceBoundary() const;
+    float snapshotMidAngle(const mapping::LidarVirtualSensorMapping::SensorSnapshot& snapshot) const;
+    std::vector<double> sampleBspline(const std::vector<double>& parameters,
+                                      const std::vector<double>& values,
+                                      std::size_t resolution) const;
+    std::vector<glm::vec2> buildFreeSpacePolygon(
+        const mapping::LidarVirtualSensorMapping::SensorSnapshot& snapshot,
+        float farRange) const;
     void applyForceColor(const glm::vec3& color, float alpha);
     void resetForceColor();
     void updateContourTranslation();
@@ -193,6 +200,7 @@ private:
     std::vector<glm::vec2> m_translatedContour;
     glm::vec2 m_closestContourPoint = glm::vec2(0.0F);
     float m_closestContourDistance = std::numeric_limits<float>::max();
+    std::vector<glm::vec2> m_freeSpaceBoundary;
     Camera m_camera;
     CameraMode m_cameraMode = CameraMode::FreeOrbit;
     int m_activeMouseButton = -1;

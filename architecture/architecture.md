@@ -13,6 +13,7 @@
 - `Visualizer` keeps VAOs/VBOs for ground/non-ground points, a shader, and ImGui context—plus world controls for camera mode, point size, color/alpha, clipping, replay speed, and contour overlays (`visualization/Visualizer.cpp`).
 - Altitude classification uses fourteen zone labels and color thresholds to assign each point to a bucket when free orbit + classification is enabled (`kZoneLabels`, `kZoneColors`, `kZoneThresholds`).
 - The UI now exposes `Show virtual sensor map`, `Show free-space map`, and `Show vehicle contour`, rendering sensor cones, hulls, and the yellow free-space sectors that stop at the closest valid measurement per angular bin.
+- `Show B-spline freespace map` densifies each angular bin by sampling ten midpoints, feeds ~720 measurements into Splinter's `BSpline::Builder`, and renders the resulting blue boundary (degree ≥3, equispaced knots, dynamically sized basis count) while the world controls keep ground-height, camera distance (0.5 m), and replay speed (0.1) tuned for the capture.
 - `LidarVirtualSensorMapping` exposes 72 angular bins, stores separate ground/non-ground hulls, ignores points beneath `m_floorHeight` or within the inflated contour, and accepts the sensor offset so VCS→ISO alignment stays valid (`mapping/LidarVirtualSensorMapping.cpp`).
 - Vehicle contours inflate by `(0.1 m, 0.1 m)` at INI parse time to provide a safety buffer, and world controls surface the inflated contour, transparency, and rotation applied before drawing. 
 

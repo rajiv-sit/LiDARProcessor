@@ -34,10 +34,10 @@ LiDARProcessor is a standalone C++20 application that replays Velodyne `.pcap` t
 
 ## Visualizer Usage
 - Enable **World visualization** to draw the ground grid, contour, and sensor overlays; adjust `Point size`, `Ground/non-ground plane`, and color palettes before enabling the map overlays for clarity.
-- Toggle **Show virtual sensor map** to draw the pink/purple sensor cones plus the ground hull and **Show free-space map** to highlight yellow coverage sectors that extend up to the nearest measurement in each angular bin (`visualization/Visualizer.cpp:568-614`).
-- Use the `Ground height threshold` slider (±20 m range) to calibrate floor detection; the free-space renderer respects `kVirtualSensorMaxRange` and discards returns inside the inflated contour, while the mapper shares the camera offset via `setSensorOffset` so ISO comparisons stay aligned (`visualization/Visualizer.cpp:458-466`, `mapping/LidarVirtualSensorMapping.cpp:27-52`).
+- Toggle **Show virtual sensor map** to draw the pink/purple sensor cones plus the ground hull, and **Show free-space map** to highlight yellow coverage sectors that extend up to the nearest measurement in each angular bin; enable **Show B-spline freespace map** to smooth those 72 samples with the Splinter builder and render a single blue polygonal boundary that tracks the same coverage at higher fidelity (`visualization/Visualizer.cpp:560-900`).
+- Use the `Ground height threshold` slider (±20 m range) to calibrate floor detection; the default `-1.208 m` works best for the provided capture, the reader respects `kVirtualSensorMaxRange`, and the mapper shares the camera offset via `setSensorOffset` so ISO comparisons stay aligned (`visualization/Visualizer.cpp:458-466`, `mapping/LidarVirtualSensorMapping.cpp:27-52`).
 - The vehicle contour is inflated immediately after loading the INI profile by `(0.1 m, 0.1 m)` so hulls keep a safe margin before testing points (`visualization/Visualizer.cpp:308-317`).
-- Choose a camera mode (Free Orbit, Bird's Eye, Front, Side, Rear) or orbit freely; the scroll wheel zoom range stays between 0.5 m and 200 m, and mouse drag sets yaw/pitch while clamping pitch to ±89° (`visualization/Visualizer.cpp:780-861`).
+- Choose a camera mode (Free Orbit, Bird's Eye, Front, Side, Rear) or orbit freely; the scroll wheel zoom range stays between 0.5 m and 200 m, and mouse drag sets yaw/pitch while clamping pitch to ±89° (`visualization/Visualizer.cpp:780-861`). The default camera distance is 0.5 m and replay speed 0.1 to match the fine-grained playback.
 - The stats window reflects map toggles, letting you verify how hull updates shift when new contour offsets are applied.
 
 ## Project Structure
@@ -47,10 +47,15 @@ LiDARProcessor is a standalone C++20 application that replays Velodyne `.pcap` t
 - `visualization/` manages the OpenGL renderer, shader wrapper, ImGui UI, and new contour-aware sensor mapping logic.
 - `shaders/` stores `point.vs/.fs`, which color points by height/intensity/classification.
 - `data/` provides `testCase.pcap` captures, vehicle INI profiles, and visualization settings.
+- `splinter/` bundles the Splinter B-spline builder sources that the visualizer uses to smooth the freespace boundary.
 
 ## Observing the Output
 - After running `run_debug.bat`, inspect `build/Debug/` for the executable plus the copied `shaders/` and `data/` directories so future runs can start from the build folder.
 - Flip camera views, adjust zoom, and switch color modes to observe how the altitude zone legend plus stats window react to live scans.
+
+## B-spline Freespace Map
+- The Splinter builder now consumes 10 subdivisions per angular sector (~720 samples) instead of one per bin, fits 720+ basis functions with cubic or higher degree, and evaluates the spline across that dense parameter range to produce the blue freespace boundary you can toggle with **Show B-spline freespace map**; the color-coded overlay and controls are wired through `visualization/Visualizer.cpp` plus the `splinter/` sources so every frame reuses the latest scan buffer.
+- `docs/figures/bspline_freespace.png` illustrates the difference: the yellow measurements (sector midpoints) stay close to the blue spline hull, and filtering by `Ground height threshold` plus the default replay speed 0.1 gives the smoothest reconstruction.
 
 ## Visual Reference
 <img width="1911" height="1029" alt="image" src="https://github.com/user-attachments/assets/5cb40403-ac21-41d4-bebb-f5d9e4e6f504" />
@@ -61,6 +66,9 @@ Figure 2: Yellow coverage sectors show the maximum measurement range per virtual
 
 <img width="1916" height="1028" alt="image" src="https://github.com/user-attachments/assets/916b928d-0c3f-4cd7-8689-5ba30826e7bd" />
 Figure 3: Freespace mapping.
+
+<img width="910" height="614" alt="image" src="docs/figures/bspline_freespace.png" />
+Figure 4: The blue B-spline freespace boundary (right) follows the yellow sector measurements (left) after applying the Splinter builder to the 720 subdivided samples.
 
 ## LiDAR Ecosystem & Roadmap
 - **Current support**: Velodyne HDL/VLP sensors via `reader/src/VelodynePCAPReader.cpp`; new drivers can reuse the `BaseLidarSensor` interface.

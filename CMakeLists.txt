@@ -21,8 +21,26 @@ set(LIDAR_SOURCES
     bindings/imgui_impl_glfw.cpp
     bindings/imgui_impl_opengl3.cpp
 )
+set(SPLINTER_SOURCES
+    splinter/src/bspline.cpp
+    splinter/src/bsplinebasis.cpp
+    splinter/src/bsplinebasis1d.cpp
+    splinter/src/bsplinebuilder.cpp
+    splinter/src/datapoint.cpp
+    splinter/src/datatable.cpp
+    splinter/src/function.cpp
+    splinter/src/knots.cpp
+    splinter/src/mykroneckerproduct.cpp
+    splinter/src/serializer.cpp
+    splinter/src/utilities.cpp
+)
 
 add_executable(LiDARProcessor ${LIDAR_SOURCES})
+add_library(Splinter STATIC ${SPLINTER_SOURCES})
+
+target_include_directories(Splinter PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/splinter/include)
+target_link_libraries(Splinter PUBLIC Eigen3::Eigen)
 
 target_include_directories(LiDARProcessor PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -62,6 +80,8 @@ endif()
 target_link_libraries(LiDARProcessor PRIVATE OpenGL::GL)
 target_link_libraries(LiDARProcessor PRIVATE Eigen3::Eigen)
 target_link_libraries(LiDARProcessor PRIVATE glm::glm)
+
+target_link_libraries(LiDARProcessor PRIVATE Splinter)
 
 set(BUILD_RESOURCES_DIR ${CMAKE_CURRENT_BINARY_DIR}/resources)
 file(MAKE_DIRECTORY ${BUILD_RESOURCES_DIR})

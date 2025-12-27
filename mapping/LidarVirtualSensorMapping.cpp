@@ -2,6 +2,7 @@
 
 #include <glm/gtc/constants.hpp>
 
+#include <algorithm>
 #include <cmath>
 
 namespace mapping
@@ -11,24 +12,9 @@ namespace
 constexpr float kSensorTolerance = 1e-5F;
 }
 
-LidarVirtualSensorMapping::LidarVirtualSensorMapping(float forwardOffset, float rearOffset, float floorHeight)
-    : m_forwardOffset(forwardOffset)
-    , m_rearOffset(rearOffset)
-    , m_floorHeight(floorHeight)
+LidarVirtualSensorMapping::LidarVirtualSensorMapping(float floorHeight)
+    : m_floorHeight(floorHeight)
 {
-    rebuild();
-}
-
-void LidarVirtualSensorMapping::setOffsets(float forwardOffset, float rearOffset)
-{
-    if (std::fabs(forwardOffset - m_forwardOffset) < kSensorTolerance &&
-        std::fabs(rearOffset - m_rearOffset) < kSensorTolerance)
-    {
-        return;
-    }
-
-    m_forwardOffset = forwardOffset;
-    m_rearOffset = rearOffset;
     rebuild();
 }
 
@@ -84,6 +70,41 @@ void LidarVirtualSensorMapping::updatePoints(
     }
 }
 
+void LidarVirtualSensorMapping::setVehicleContour(const std::vector<glm::vec2>& contour)
+{
+    if (contour.empty())
+    {
+        return;
+    }
+
+    glm::vec2 center(0.0F);
+    for (const auto& point : contour)
+    {
+        center += point;
+    }
+    center /= static_cast<float>(contour.size());
+
+    float maxDistanceSquared = 0.0F;
+    for (const auto& point : contour)
+    {
+        const glm::vec2 offset = point - center;
+        maxDistanceSquared = std::max(maxDistanceSquared, glm::dot(offset, offset));
+    }
+    const float radius = std::sqrt(maxDistanceSquared);
+
+    const glm::vec2 centerDelta = center - m_vehicleCenter;
+    const bool centerChanged = glm::dot(centerDelta, centerDelta) > (kSensorTolerance * kSensorTolerance);
+    const bool radiusChanged = std::fabs(radius - m_vehicleRadius) > kSensorTolerance;
+    if (!centerChanged && !radiusChanged)
+    {
+        return;
+    }
+
+    m_vehicleCenter = center;
+    m_vehicleRadius = radius;
+    rebuild();
+}
+
 const std::vector<glm::vec2>& LidarVirtualSensorMapping::hull() const noexcept
 {
     return m_hull;
@@ -107,6 +128,8 @@ LidarVirtualSensorMapping::snapshots() const
             definition.orthMinX,
             definition.orthMaxX,
             definition.orthSideSign,
+            definition.orthMinY,
+            definition.orthMaxY,
             sample.position,
             sample.distanceSquared};
     }
@@ -119,60 +142,23 @@ void LidarVirtualSensorMapping::rebuild()
     std::fill(m_sensorSamples.begin(), m_sensorSamples.end(), SensorSample{});
     m_hull.clear();
 
-    const glm::vec2 forwardPoint(m_forwardOffset, 0.0F);
-    const glm::vec2 rearPoint(m_rearOffset, 0.0F);
-    const float orthogonalWidth =
-        (m_forwardOffset - m_rearOffset) / static_cast<float>(kNumOrthogonalSensors);
-    const float delta = glm::pi<float>() / static_cast<float>(kNumAngularSensors);
-    float theta = glm::pi<float>();
-    std::size_t index = 0;
+    const float delta = glm::two_pi<float>() / static_cast<float>(kNumAngularSensors);
+    float theta = 0.0F;
 
-    auto addAngular = [&](const glm::vec2& origin, std::size_t count) {
-        for (std::size_t i = 0; i < count && index < kVirtualSensorCount; ++i)
-        {
-            const float startAngle = normalizeAngle(theta);
-            theta += delta;
-            const float endAngle = normalizeAngle(theta);
+    for (std::size_t index = 0; index < kNumAngularSensors; ++index)
+    {
+        const float startAngle = normalizeAngle(theta);
+        theta += delta;
+        const float endAngle = normalizeAngle(theta);
 
-            SensorDefinition definition{};
-            definition.isAngular = true;
-            definition.reference = origin;
-            definition.lowerAngle = startAngle;
-            definition.upperAngle = endAngle;
-            definition.wrapAround = endAngle < startAngle;
-            definition.orthSideSign = 0.0F;
-            definition.orthMinX = 0.0F;
-            definition.orthMaxX = 0.0F;
-            m_sensorDefinitions[index++] = definition;
-        }
-    };
-
-    auto addOrthogonal = [&](const glm::vec2& origin, float step) {
-        const float sideSign = step >= 0.0F ? 1.0F : -1.0F;
-        for (std::size_t i = 0; i < kNumOrthogonalSensors && index < kVirtualSensorCount; ++i)
-        {
-            const glm::vec2 start = origin + glm::vec2(step * static_cast<float>(i), 0.0F);
-            const glm::vec2 end =
-                origin + glm::vec2(step * (static_cast<float>(i) + 1.0F), 0.0F);
-
-            SensorDefinition definition{};
-            definition.isAngular = false;
-            definition.reference = origin;
-            definition.orthMinX = std::min(start.x, end.x);
-            definition.orthMaxX = std::max(start.x, end.x);
-            definition.orthSideSign = sideSign;
-            definition.lowerAngle = 0.0F;
-            definition.upperAngle = 0.0F;
-            definition.wrapAround = false;
-            m_sensorDefinitions[index++] = definition;
-        }
-    };
-
-    addAngular(rearPoint, kNumAngularSensors / 2U);
-    addOrthogonal(rearPoint, orthogonalWidth);
-    addAngular(forwardPoint, kNumAngularSensors);
-    addOrthogonal(forwardPoint, -orthogonalWidth);
-    addAngular(rearPoint, kNumAngularSensors / 2U);
+        SensorDefinition definition{};
+        definition.isAngular = true;
+        definition.reference = m_vehicleCenter;
+        definition.lowerAngle = startAngle;
+        definition.upperAngle = endAngle;
+        definition.wrapAround = endAngle < startAngle;
+        m_sensorDefinitions[index] = definition;
+    }
 }
 
 void LidarVirtualSensorMapping::resetSamples()
@@ -214,6 +200,13 @@ bool LidarVirtualSensorMapping::sensorContains(const SensorDefinition& sensor, c
         return false;
     }
     if (sensor.orthSideSign < 0.0F && point.y > 0.0F)
+    {
+        return false;
+    }
+
+    const float minY = std::min(sensor.orthMinY, sensor.orthMaxY);
+    const float maxY = std::max(sensor.orthMinY, sensor.orthMaxY);
+    if (point.y < minY || point.y > maxY)
     {
         return false;
     }

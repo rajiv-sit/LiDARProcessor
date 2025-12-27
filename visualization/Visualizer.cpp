@@ -51,7 +51,7 @@ const std::array<glm::vec3, 5> kZoneColors = {
     glm::vec3(1.0F, 0.55F, 0.0F),
     glm::vec3(0.9F, 0.1F, 0.1F)};
 constexpr float kDefaultMountHeight = 1.8F;
-constexpr float kVirtualSensorMaxRange = 7.0F;
+constexpr float kVirtualSensorMaxRange = 120.0F;
 constexpr float kVirtualSensorThickness = 0.5F;
 constexpr float kVirtualSensorPointSize = 6.0F;
 constexpr float kGridHalfSpan = 50.0F;
@@ -1499,20 +1499,7 @@ void Visualizer::updateSensorOffsets()
         return;
     }
 
-    float minY = std::numeric_limits<float>::max();
-    float maxY = -std::numeric_limits<float>::max();
-    for (const auto& point : m_translatedContour)
-    {
-        minY = std::min(minY, point.y);
-        maxY = std::max(maxY, point.y);
-    }
-
-    if (minY >= maxY)
-    {
-        return;
-    }
-
-    m_virtualSensorMapping.setOffsets(maxY, minY);
+    m_virtualSensorMapping.setVehicleContour(m_translatedContour);
 }
 
 float Visualizer::distanceToContour(const glm::vec2& point) const

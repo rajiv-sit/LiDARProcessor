@@ -987,9 +987,9 @@ void Visualizer::drawVirtualSensorsFancy()
     glGetBooleanv(GL_DEPTH_WRITEMASK, &depthMask);
     glDepthMask(GL_FALSE);
 
-    const glm::vec3 shadowColor(0.1F, 0.3F, 0.9F);
-    const glm::vec3 measurementColor(0.2F, 0.9F, 0.4F);
-    const glm::vec3 pointColor(1.0F, 0.9F, 0.3F);
+    const glm::vec3 shadowColor(0.55F, 0.15F, 0.85F);
+    const glm::vec3 measurementColor(1.0F, 0.25F, 0.65F);
+    const glm::vec3 pointColor(0.95F, 0.55F, 0.9F);
     for (const auto& snapshot : snapshots)
     {
         if (!snapshot.valid)

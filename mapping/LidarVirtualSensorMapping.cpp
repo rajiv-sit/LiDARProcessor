@@ -34,8 +34,12 @@ void LidarVirtualSensorMapping::updatePoints(
 
     for (const auto& point : points)
     {
-        const bool groundPoint = point.z < m_floorHeight;
         const glm::vec2 position(point.x, point.y);
+        if (isInsideVehicleContour(position))
+        {
+            continue;
+        }
+        const bool groundPoint = point.z < m_floorHeight;
         const float distanceSquared = glm::dot(position, position);
 
         auto& samples = groundPoint ? m_sensorSamplesGround : m_sensorSamples;
@@ -82,6 +86,7 @@ void LidarVirtualSensorMapping::setVehicleContour(const std::vector<glm::vec2>& 
     {
         return;
     }
+    m_vehicleContour = contour;
 
     glm::vec2 center(0.0F);
     for (const auto& point : contour)
@@ -236,6 +241,32 @@ bool LidarVirtualSensorMapping::sensorContains(const SensorDefinition& sensor, c
     }
 
     return point.x >= sensor.orthMinX && point.x <= sensor.orthMaxX;
+}
+
+bool LidarVirtualSensorMapping::isInsideVehicleContour(const glm::vec2& point) const
+{
+    if (m_vehicleContour.size() < 3)
+    {
+        return false;
+    }
+
+    bool inside = false;
+    size_t count = m_vehicleContour.size();
+    size_t j = count - 1;
+    for (size_t i = 0; i < count; ++i)
+    {
+        const auto& a = m_vehicleContour[i];
+        const auto& b = m_vehicleContour[j];
+        const bool intersects = ((a.y > point.y) != (b.y > point.y)) &&
+            (point.x <
+             (b.x - a.x) * (point.y - a.y) / ((b.y - a.y) != 0.0F ? (b.y - a.y) : std::numeric_limits<float>::epsilon()) + a.x);
+        if (intersects)
+        {
+            inside = !inside;
+        }
+        j = i;
+    }
+    return inside;
 }
 
 float LidarVirtualSensorMapping::normalizeAngle(float angle)

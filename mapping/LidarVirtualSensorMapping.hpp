@@ -73,12 +73,14 @@ private:
     void resetSamples();
     float normalizeAngle(float angle);
     bool sensorContains(const SensorDefinition& sensor, const glm::vec2& point) const;
+    bool isInsideVehicleContour(const glm::vec2& point) const;
 
     std::array<SensorDefinition, kVirtualSensorCount> m_sensorDefinitions{};
     std::array<SensorSample, kVirtualSensorCount> m_sensorSamples{};
     std::array<SensorSample, kVirtualSensorCount> m_sensorSamplesGround{};
     std::vector<glm::vec2> m_hullNonGround;
     std::vector<glm::vec2> m_hullGround;
+    std::vector<glm::vec2> m_vehicleContour;
     glm::vec2 m_vehicleCenter = glm::vec2(0.0F);
     float m_vehicleRadius = 0.0F;
     float m_floorHeight;

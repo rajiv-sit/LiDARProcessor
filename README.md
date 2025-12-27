@@ -67,7 +67,7 @@ Figure 2: Yellow coverage sectors show the maximum measurement range per virtual
 <img width="1916" height="1028" alt="image" src="https://github.com/user-attachments/assets/916b928d-0c3f-4cd7-8689-5ba30826e7bd" />
 Figure 3: Freespace mapping.
 
-<img width="910" height="614" alt="image" src="docs/figures/bspline_freespace.png" />
+<img width="1910" height="1030" alt="image" src="https://github.com/user-attachments/assets/1304cc70-46fb-4714-aed6-91c2962b6653" />
 Figure 4: The blue B-spline freespace boundary (right) follows the yellow sector measurements (left) after applying the Splinter builder to the 720 subdivided samples.
 
 ## LiDAR Ecosystem & Roadmap

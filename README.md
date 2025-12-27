@@ -1,71 +1,84 @@
 # LiDARProcessor
 
-LiDARProcessor is a standalone C++20 application that replays Velodyne `.pcap` traces, converts them into `(x,y,z)` point clouds via a DAT-compatible reader, and renders the result with OpenGL (GLFW + GLEW) plus ImGui-driven controls.
+LiDARProcessor is a standalone C++20 application that replays Velodyne `.pcap` traces, converts the packets into `(x,y,z)` point clouds via a DAT-compatible reader, and renders the result with OpenGL + ImGui controls.
 
 ## Overview
-- The executable starts at `test/main.cpp` and resolves `data/testCase.pcap` relative to the binary before instantiating a `lidar::LidarEngine` with a factory-created Velodyne sensor interface.
-- `VelodyneLidar` wraps `reader/src/VelodynePCAPReader.cpp`, maintains HDL32/VLP16 geometry constants, and produces `BaseLidarSensor::PointCloud` frames that `LidarEngine` buffers and passes to the `Visualizer`.
-- `Visualizer` hands points to an OpenGL shader pipeline (`shaders/point.vs/.fs`), offers multiple camera views, classification/height/intensity color modes, altitude zoning in free-orbit mode, and a live ImGui stats/controls docked overlay.
+- `test/main.cpp` finds `data/testCase.pcap` (relative to the binary or an overridden path), instantiates a Velodyne sensor implementation, and wires it through `LidarEngine` to the visualizer loop.
+- `VelodyneLidar` wraps `reader/src/VelodynePCAPReader.cpp`, keeps the HDL32/VLP16 geometry tables, and exposes `BaseLidarSensor::PointCloud` batches for the engine to replay at the configured rate.
+- `Visualizer` uploads ground/non-ground points, exposes camera presets and ImGui controls, and now overlays the virtual sensor and free-space hulls that respect the vehicle contour and contour inflation logic.
 
 ## Building
-1. Install [Conan 2.x](https://docs.conan.io/en/latest/) and ensure `cmake` is available.
+1. Install [Conan 2.x](https://docs.conan.io/en/latest/) and ensure `cmake` is on your path.
 2. Run the helper script:
    ```bat
    run_debug.bat
    ```
-   This sequence removes `build/`, invokes `conan install . -if build --build=missing -s build_type=Debug`, runs `cmake` with the generated toolchain, builds `LiDARProcessor`, and copies `shaders/` plus `data/` into `build/Debug/`.
-3. If you prefer manual steps:
+   This removes `build/`, runs `conan install . --output-folder=build --build=missing --settings build_type=Debug`, configures via CMake with the generated toolchain, builds `LiDARProcessor`, copies `shaders/` and `data/` into `build/Debug/`, and finally runs the executable.
+3. Alternatively run the steps manually:
    ```bat
    conan install . --output-folder=build --build=missing --settings build_type=Debug
-   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=build/conan_toolchain.cmake -G "Visual Studio 17 2022"
+   cmake -S . -B build -G "Visual Studio 17 2022" -DCMAKE_TOOLCHAIN_FILE=build/conan_toolchain.cmake
    cmake --build build --config Debug
    ```
-4. The build links Eigen3, GLFW, GLEW, GLM, ImGui, and the system OpenGL targets (`CMakeLists.txt:33-63`).
+4. Dependencies: Eigen3, GLFW, GLEW, GLM, ImGui, and the system OpenGL targets (`conanfile.py`, `CMakeLists.txt`).
 
 ## Running
-- Run `build/Debug/LiDARProcessor.exe` (or use `run_debug.bat`, which already executes the binary after building).
-- The runtime logs `Preparing sensor <identifier>` and opens a GLFW window with the visualization plus the ImGui overlay.
-- The ImGui panel exposes camera view/distance, replay speed, color/alpha modes, point size, clipping, world visualization toggles, and altitude-zone sliders (`visualization/Visualizer.cpp:330-520`).
+- Launch `build/Debug/LiDARProcessor.exe` (or rely on `run_debug.bat`, which already calls the executable after building).
+- The console prints `Preparing sensor <identifier>` and the GLFW window opens with the point cloud, grid, and captioned ImGui overlay.
+- ImGui exposes camera selection, replay speed, color/alpha controls, clipping, world visualization toggles, and altitude zone sliders (`visualization/Visualizer.cpp:330-520`).
 
 ## Visualizer Experience
-- Default rendering splits ground and non-ground buffers to control color/transparency separately; each frame reuses the host-side buffer before uploading to the GPU so the renderer stays responsive (`visualization/Visualizer.cpp:127-189`).
-- In **Classification + Free Orbit**, the shader uses five altitude zones (`z < -1.5 m`, `-1.5 ≤ z < 0`, `z = 0`, `0 < z < 1.5`, `z ≥ 1.5`) with a dedicated color palette and legend, letting you see vertical stratification while the slider and scroll clamps start at 0.5 m for close inspection (`visualization/Visualizer.cpp:18-380`, `shaders/point.fs:7-88`).
-- Height/intensity modes interpolate between “cool” and “warm” palettes and obey the `Clip height`/`Clip intensity` sliders; the alpha blend respects user transparency or intensity-based visibility (`shaders/point.fs:20-88`).
-- Use the stats window (backed by `Visualizer::updatePoints`) to monitor total, ground, non-ground, and GPU point counts while the shader receives min/max height and zone color uniforms each frame (`visualization/Visualizer.cpp:368-410`, `visualization/Visualizer.cpp:115-189`).
+- Rendering splits ground and non-ground buffers so you can control their transparency/hue independently while the shader regularly receives min/max height plus classification uniforms (`visualization/Visualizer.cpp:127-189`, `shaders/point.fs:20-88`).
+- In **Classification + Free Orbit** the legend maps each point into one of five altitude zones (`z < -1.75 m`, `-1.75 m <= z < -1.50 m`, ..., `z >= 1.75 m`) and colors them accordingly (`visualization/Visualizer.cpp:18-380`, `shaders/point.fs:7-88`).
+- Height and intensity palettes transition between cool/warm colors as you scrub the `Clip height` and `Clip intensity` sliders, and the stats window updates totals for total/ground/non-ground points plus the GPU buffer capacity (`visualization/Visualizer.cpp:115-189`).
+
+## Visualizer Usage
+- Enable **World visualization** to draw the ground grid, contour, and sensor overlays; adjust `Point size`, `Ground/non-ground plane`, and color palettes before enabling the map overlays for clarity.
+- Toggle **Show virtual sensor map** to draw the pink/purple sensor cones plus the ground hull and **Show free-space map** to highlight yellow coverage sectors that extend up to the nearest measurement in each angular bin (`visualization/Visualizer.cpp:568-614`).
+- Use the `Ground height threshold` slider (±20 m range) to calibrate floor detection; the free-space renderer respects `kVirtualSensorMaxRange` and discards returns inside the inflated contour, while the mapper shares the camera offset via `setSensorOffset` so ISO comparisons stay aligned (`visualization/Visualizer.cpp:458-466`, `mapping/LidarVirtualSensorMapping.cpp:27-52`).
+- The vehicle contour is inflated immediately after loading the INI profile by `(0.1 m, 0.1 m)` so hulls keep a safe margin before testing points (`visualization/Visualizer.cpp:308-317`).
+- Choose a camera mode (Free Orbit, Bird's Eye, Front, Side, Rear) or orbit freely; the scroll wheel zoom range stays between 0.5 m and 200 m, and mouse drag sets yaw/pitch while clamping pitch to ±89° (`visualization/Visualizer.cpp:780-861`).
+- The stats window reflects map toggles, letting you verify how hull updates shift when new contour offsets are applied.
 
 ## Project Structure
-- `architecture/` contains the high-level system overview you are reading.
-- `reader/` hosts the DAT-derived reader plus `VDYNE::LidarScan_t` definitions.
-- `velodyne/` includes sensors (`VelodyneLidar.cpp`), the engine (`LidarEngine.cpp`), and the factory.
-- `visualization/` manages the OpenGL renderer, shader wrapper, and UI logic.
-- `shaders/` holds the GLSL vertex/fragment programs that color points by height/intensity/classification.
-- `data/` supplies `testCase.pcap` (Velodyne HDL-32E capture) plus INI files referenced by the GUI.
+- `architecture/` contains the system overview you are reading now.
+- `reader/` hosts the DAT-derived reader and `VDYNE::LidarScan_t` definitions.
+- `velodyne/` holds the sensor implementations (`VelodyneLidar.cpp`), engine (`LidarEngine.cpp`), and factory helper.
+- `visualization/` manages the OpenGL renderer, shader wrapper, ImGui UI, and new contour-aware sensor mapping logic.
+- `shaders/` stores `point.vs/.fs`, which color points by height/intensity/classification.
+- `data/` provides `testCase.pcap` captures, vehicle INI profiles, and visualization settings.
 
--## Observing the Output
- - With `run_debug.bat`, the `build/Debug/` folder contains the executable, copied shaders, and the `.pcap` data so you can run the binary directly.
- - Try toggling the camera view, zoom, and classification palette to observe how the altitude zone colors slot into the shader, and notice the stats window updating as new scans cycle through.
+## Observing the Output
+- After running `run_debug.bat`, inspect `build/Debug/` for the executable plus the copied `shaders/` and `data/` directories so future runs can start from the build folder.
+- Flip camera views, adjust zoom, and switch color modes to observe how the altitude zone legend plus stats window react to live scans.
 
 ## Visual Reference
-<img width="1915" height="1032" alt="image" src="https://github.com/user-attachments/assets/a217132f-ef2f-47ab-93ce-b8fcd120d254" />
-Figure 1: The ImGui-driven visualization with altitude zoning, point stats, and shader-driven coloring.
+![LiDAR point cloud](assets/placeholders/lidar.png)
+Figure 1: The LiDAR point cloud colored by the current palette and split into ground/non-ground buffers.
+
+![Free-space map](assets/placeholders/free_space.png)
+Figure 2: Yellow coverage sectors show the maximum measurement range per virtual sensor bin, respecting `kVirtualSensorMaxRange`.
+
+![Alternative view](assets/placeholders/other.png)
+Figure 3: A different camera/visualization mode for comparison (e.g., side or rear view).
 
 ## LiDAR Ecosystem & Roadmap
-- **Current support**: only Velodyne HDL/VLP sensors via `reader/src/VelodynePCAPReader.cpp`; additional targets rely on the same `BaseLidarSensor` strategy so new drivers can be slotted in later.
-- **Leading automotive/autonomous LiDAR names to consider** (historic & modern references in parentheses show the ecosystems these vendors shape):
-  - Velodyne LiDAR – established 3D LiDAR leader (now part of Ouster).
+- **Current support**: Velodyne HDL/VLP sensors via `reader/src/VelodynePCAPReader.cpp`; new drivers can reuse the `BaseLidarSensor` interface.
+- **LiDAR manufacturers to watch**:
+  - Velodyne LiDAR – established 3D LiDAR leader (part of Ouster).
   - Ouster – digital solid-state LiDAR for automotive, industrial, robotics.
-  - RoboSense (RoboSense Technology) – Chinese automotive LiDAR provider.
-  - Hesai Technology – high-performance LiDAR manufacturer from China.
+  - RoboSense – Chinese automotive LiDAR provider.
+  - Hesai Technology – high-performance LiDAR manufacturer.
   - Innoviz Technologies – solid-state automotive LiDAR supplier.
-  - Cepton – intelligent LiDAR sensors for vehicles and smart infrastructure.
+  - Cepton – intelligent LiDAR for vehicles and infrastructure.
   - Aeva Technologies – 4D LiDAR delivering range + velocity.
   - AEye, Inc. – digital/active scanning LiDAR + perception systems.
-  - Luminar Technologies – legacy automotive LiDAR (filed for bankruptcy in 2025).
+  - Luminar Technologies – legacy automotive LiDAR.
   - Quanergy Systems – automotive and industrial LiDAR.
   - Ibeo Automotive Systems – early automotive LiDAR pioneer.
-  - Benewake – LiDAR modules for robotics and automotive.
+  - Benewake – compact LiDAR modules for robotics/automotive.
   - Livox – notable (now discontinued) sensor modules.
 
 ## Troubleshooting
-- If `run_debug.bat` fails to find dependencies, rerun `conan install . --output-folder=build --build=missing --settings build_type=Debug`.
-- Missing shader files indicate either `shaders/` was not copied or the executable is not run from the build folder; copy `shaders/` and `data/` into the runtime directory if needed.
+- Rerun `conan install . --output-folder=build --build=missing --settings build_type=Debug` if dependencies are missing.
+- Ensure `shaders/` and `data/` are copied into the runtime directory; missing shader files usually mean the build folder lacked those assets.

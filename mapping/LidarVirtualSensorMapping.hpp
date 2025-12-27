@@ -21,6 +21,7 @@ public:
     explicit LidarVirtualSensorMapping(float floorHeight = -1.8F);
 
     void setFloorHeight(float floorHeight);
+    void setSensorOffset(const glm::vec2& offset);
     void updatePoints(const lidar::BaseLidarSensor::PointCloud& points);
     void setVehicleContour(const std::vector<glm::vec2>& contour);
 
@@ -84,6 +85,7 @@ private:
     glm::vec2 m_vehicleCenter = glm::vec2(0.0F);
     float m_vehicleRadius = 0.0F;
     float m_floorHeight;
+    glm::vec2 m_sensorOffset = glm::vec2(0.0F);
 };
 
 } // namespace mapping

@@ -1,31 +1,60 @@
 # LiDARProcessor Architecture
 
 ## 1. Overview
-- The `LiDARProcessor` executable (`test/main.cpp:8`) locates a `data/testCase.pcap` capture alongside the binary, lets the caller override the path, and hands a factory-created Velodyne sensor over to `lidar::LidarEngine` so the runtime only depends on the sensor interface (`test/main.cpp:8-28`).
-- `LidarEngine` configures the sensor, keeps two reusable `PointCloud` buffers, and drives `Visualizer` updates every ~33 ms while respecting a replay-speed scale, implementing the factory/strategy/double-buffer guidance described in the docs (`velodyne/src/engine/LidarEngine.cpp:10-69`).
-- Visualization lives in its own subsystem (`visualization/Visualizer.cpp:1-520`), feeding shader code in `shaders/point.vs/.fs` and exposing ImGui controls to adjust camera view, color mode, clipping, transparency, and the new altitude zoning in free-orbit/classification mode (`visualization/Visualizer.cpp:1-683`, `shaders/point.fs:1-88`).
+- The `LiDARProcessor` binary (`test/main.cpp`) locates `data/testCase.pcap`, instantiates a Velodyne sensor via `VelodyneFactory`, and hooks it into `lidar::LidarEngine` so the render loop only depends on the abstract sensor interface.
+- `LidarEngine` cycles scans every ~33 ms, maintains double-buffered `PointCloud` storage, and feeds the visualizer while keeping replay speed scaling, timestamps, and sensor configuration in lockstep (`velodyne/src/engine/LidarEngine.cpp:10-69`).
+- Visualization drives shaders in `shaders/point.vs/.fs`, hosts ImGui controls, and overlays both the virtual sensor hulls and the new free-space map that respect the contour/offset/toggle logic.
 
-## 2. Data capture & Reader
-- The build ships a compact DAT-derived definition file (`reader/include/LidarScan.hpp:1-108`) under the `VDYNE` namespace, so scans, beams, and firing metadata are defined locally instead of relying on external frameworks.
-- `reader/src/VelodynePCAPReader.cpp` parses the `.pcap` stream with the custom `GetFirstLidarScan`/`GetNextLidarScan` loop, determines timestamp scaling and device type, and populates the `VDYNE::LiDARScan_t` structures that `VelodyneLidar` consumes (`reader/src/VelodynePCAPReader.cpp`). The reader exposes a C API so the sensor class can interoperate with the existing DLL/SDK bindings.
+## 2. Reader & Sensor
+- `reader/src/VelodynePCAPReader.cpp` parses DAT-style HDL32/VLP16 packets via `VDYNE` structures (`reader/include/LidarScan.hpp`), exposing a C++ API so `VelodyneLidar` can consume scans without pulling in larger SDKs.
+- `VelodyneLidar` applies vertical-angle tables, filtering, and coordinate transforms to produce `(x,y,z)` frames while the factory supports HDL-32E and VLP-16 variants (`velodyne/src/sensors/VelodyneLidar.cpp`, `velodyne/src/sensors/LidarFactory.cpp`).
 
-## 3. Engine & Sensor Strategy
-- `VelodyneLidar` is a `BaseLidarSensor` implementation that initializes the `VDYNE` reader, tracks HDL32/VLP16 hardware metadata, filters invalid ranges, respects the configured FOV/range, and converts azimuth/range/intensity into `(x,y,z)` points stored in the engine’s active buffer (`velodyne/src/sensors/VelodyneLidar.cpp:1-168`).
-- The sensor’s vertical-angle tables and per-beam timing constants ensure the simulated scan matches real HDL32/VLP16 geometry before each frame, and `LidarEngine::captureFrame` swaps buffers and timestamps to keep the visualizer and reader in sync (`velodyne/src/sensors/VelodyneLidar.cpp:28-168`, `velodyne/src/engine/LidarEngine.cpp:37-69`).
-- `VelodyneFactory` currently produces HDL-32E or VLP-16 variants and can be extended to new sensor types by adding cases that return `BaseLidarSensor` implementations (`velodyne/src/sensors/LidarFactory.cpp:12-35`).
+## 3. Visualization Pipeline
+- `Visualizer` keeps VAOs/VBOs for ground/non-ground points, a shader, and ImGui context—plus world controls for camera mode, point size, color/alpha, clipping, replay speed, and contour overlays (`visualization/Visualizer.cpp`).
+- Altitude classification uses fourteen zone labels and color thresholds to assign each point to a bucket when free orbit + classification is enabled (`kZoneLabels`, `kZoneColors`, `kZoneThresholds`).
+- The UI now exposes `Show virtual sensor map`, `Show free-space map`, and `Show vehicle contour`, rendering sensor cones, hulls, and the yellow free-space sectors that stop at the closest valid measurement per angular bin.
+- `LidarVirtualSensorMapping` exposes 72 angular bins, stores separate ground/non-ground hulls, ignores points beneath `m_floorHeight` or within the inflated contour, and accepts the sensor offset so VCS→ISO alignment stays valid (`mapping/LidarVirtualSensorMapping.cpp`).
+- Vehicle contours inflate by `(0.1 m, 0.1 m)` at INI parse time to provide a safety buffer, and world controls surface the inflated contour, transparency, and rotation applied before drawing. 
 
-## 4. Visualization Pipeline
-- `Visualizer` exposes a GLFW window with a VAO/VBO pair for vertices, an ImGui context, and callbacks for orbit, scroll, and mouse interactions. Buffers are double-buffered so the renderer can upload ground/non-ground segments separately, and the ImGui panel controls point size, camera view/distance, replay speed, color mode, alpha mode, clipping, and coloring of ground vs. non-ground points (`visualization/Visualizer.cpp:1-520`).
-- Free-orbit + classification mode assigns each point to one of five altitude zones (`z < -1.5 m`, `-1.5 ≤ z < 0`, `z = 0`, `0 < z < 1.5`, `z ≥ 1.5`), uploads the zone colors via `uZoneColors`, and lets the legend display the mapping while keeping the legacy ground/non-ground palette available for other color modes (`visualization/Visualizer.cpp:18-52`, `visualization/Visualizer.cpp:127-189`, `visualization/Visualizer.cpp:300-420`, `visualization/Visualizer.cpp:633-684`, `shaders/point.fs:7-88`).
+## 4. Data Flow
+- `Visualizer::updatePoints` translates VCS samples relative to the sensor offset, filters ground vs. non-ground via the `Ground height threshold` slider, and sends only non-ground points (still in VCS) to the mapping layer, which subtracts the offset again for contour checks.
+- The free-space map draws each sector as a yellow polygon that stretches to the `snapshot.position` or `kVirtualSensorMaxRange`, with a boundary line highlighting the measurement limit, while `drawVirtualSensorsFancy` sticks to the pink/purple palette for shadows, measurements, and the ground hull.
 
-## 5. Shader & Rendering Details
-- The vertex shader scales world coordinates into clip space and forwards height/intensity/classification to the fragment shader, which now checks `uUseZoneColors` before mixing ground/non-ground palettes, evaluates height/intensity gradients, and derives alpha from the selected mode (`shaders/point.vs:1-17`, `shaders/point.fs:1-88`).
-- Uniforms such as `uMinHeight`, `uMaxHeight`, and `uClipValue` are updated each frame based on the data’s min/max z, and the shader can draw transparent points whose alpha reflects either user-specified values or intensity (`visualization/Visualizer.cpp:368-410`, `shaders/point.fs:34-88`).
+## 5. Directory Snapshot
+```
+LiDARProcessor
+├─ architecture/
+│  └─ architecture.md           # this overview
+├─ data/
+│  ├─ VehicleProfileCustom.ini  # vehicle contour + lidar mount definitions
+│  ├─ VehicleProfileFusion.ini
+│  ├─ VisualizerSettings.ini
+│  └─ testCase.pcap            # HDL-32E capture replayed by the reader
+├─ mapping/
+│  └─ LidarVirtualSensorMapping.{cpp,hpp}  # sensor bin hulls with contour filtering
+├─ reader/
+│  └─ VelodynePCAPReader.cpp    # DAT reader feeding Velodyne sensors
+├─ shaders/
+│  └─ point.{vs,fs}             # GLSL programs for coloring points by height/intensity/classification
+├─ visualization/
+│  ├─ Visualizer.{cpp,hpp}      # GL/ImGui UI, world controls, overlays, contour translation helpers
+│  └─ Shader.cpp                 # GLSL wrapper
+├─ velodyne/
+│  ├─ sensors/
+│  │  ├─ VelodyneLidar.cpp
+│  │  └─ LidarFactory.cpp
+│  └─ engine/
+│     └─ LidarEngine.cpp
+├─ run_debug.bat
+├─ run_release.bat
+├─ CMakeLists.txt
+└─ conanfile.py
+```
 
-## 6. Build & Resources
-- Conan supplies only the actively linked packages (Eigen3, GLFW, GLEW, GLM, ImGui, OpenGL system targets) to keep the dependency graph lean, and `CMakeLists.txt` copies `shaders/` and `data/` into the binary directory while linking against the targets generated by the toolchain (`conanfile.py`, `CMakeLists.txt:21-64`).
-- Helper scripts like `run_debug.bat` wrap Conan install + CMake configure/build + resource copy so developers can recreate the workflow described above; the run script also copies `data/testCase.pcap` so the sensor replay always hits real capture frames.
+## 6. Build & Runtime
+- The `run_debug.bat` helper installs Conan dependencies, generates the toolchain, builds the project, copies shaders/data, and runs the binary—remember to close the GLFW window so the script can exit cleanly.
+- The executable prints the sensor model (e.g., `Velodyne HDL-32E`) before the ImGui window appears; use the world toggles, contour sliders, and map buttons to validate free-space coverage and hull alignment.
 
-## 7. Runtime Observability
-- Once built, the executable logs the sensor identity (`Velodyne HDL-32E`) and keeps the ImGui stats window updated with total, ground, non-ground, and GPU capacity numbers; the double-buffering ensures the UI draws what the `VelodyneLidar` scan provided without stalling the reader (`velodyne/src/engine/LidarEngine.cpp:37-69`, `visualization/Visualizer.cpp:115-189`).
-
+## 7. Testing & Observability
+- ImGui stats show total, ground, non-ground, and GPU point counts, while world controls expose `Ground height threshold`, `Show virtual sensor map`, and `Show free-space map` states.
+- Height/isolation palettes are refreshed each frame by the shader uniforms, and the free-space map reuses the sensor polygon builder so the overlay stays consistent with the colored point cloud.

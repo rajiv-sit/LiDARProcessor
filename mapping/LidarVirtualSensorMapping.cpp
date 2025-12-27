@@ -27,6 +27,16 @@ void LidarVirtualSensorMapping::setFloorHeight(float floorHeight)
     m_floorHeight = floorHeight;
 }
 
+void LidarVirtualSensorMapping::setSensorOffset(const glm::vec2& offset)
+{
+    const glm::vec2 delta = offset - m_sensorOffset;
+    if (glm::length(delta) < kSensorTolerance)
+    {
+        return;
+    }
+    m_sensorOffset = offset;
+}
+
 void LidarVirtualSensorMapping::updatePoints(
     const lidar::BaseLidarSensor::PointCloud& points)
 {
@@ -34,7 +44,8 @@ void LidarVirtualSensorMapping::updatePoints(
 
     for (const auto& point : points)
     {
-        const glm::vec2 position(point.x, point.y);
+        const glm::vec2 rawPosition(point.x, point.y);
+        const glm::vec2 position = rawPosition - m_sensorOffset;
         if (isInsideVehicleContour(position))
         {
             continue;

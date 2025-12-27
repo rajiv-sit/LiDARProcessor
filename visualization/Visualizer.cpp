@@ -87,6 +87,7 @@ constexpr float kVirtualSensorMaxRange = 120.0F;
 constexpr float kVirtualSensorThickness = 0.5F;
 constexpr float kVirtualSensorPointSize = 6.0F;
 constexpr float kGridHalfSpan = 50.0F;
+constexpr glm::vec2 kContourExpansion(0.1F, 0.1F);
 
 std::string_view trim(std::string_view value)
 {
@@ -307,7 +308,12 @@ VehicleProfileData loadVehicleProfile(const fs::path& profilePath)
     profile.contour.reserve(contourPoints.size());
     for (const auto& entry : contourPoints)
     {
-        profile.contour.push_back(entry.second);
+        glm::vec2 point = entry.second;
+        const glm::vec2 direction(
+            std::copysign(1.0F, point.x),
+            std::copysign(1.0F, point.y));
+        point += direction * kContourExpansion;
+        profile.contour.push_back(point);
     }
 
     return profile;
@@ -458,7 +464,7 @@ void Visualizer::updatePoints(const BaseLidarSensor::PointCloud& points)
             nonGround.push_back(vertex);
             if (point.z >= m_floorHeight)
             {
-                nonGroundPoints.push_back(translatedPoint);
+                nonGroundPoints.push_back(point);
             }
         }
 
@@ -1583,6 +1589,7 @@ void Visualizer::applyVehicleProfile(int index)
     m_lidarVcsPosition = -m_lidarSensorOffset;
     m_lidarOrientationIsoDeg = m_currentVehicleProfile.lidarOrientation;
     m_contourTranslation = glm::vec2(0.0F,0.0F);
+    m_virtualSensorMapping.setSensorOffset(m_lidarSensorOffset);
     updateContourTranslation();
 }
 

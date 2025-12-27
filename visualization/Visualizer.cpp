@@ -389,10 +389,6 @@ bool Visualizer::initialize()
     glGenBuffers(1, &m_vbo);
     configureVertexArray(m_vao, m_vbo);
 
-    glGenVertexArrays(1, &m_mapVao);
-    glGenBuffers(1, &m_mapVbo);
-    configureVertexArray(m_mapVao, m_mapVbo);
-
     glGenVertexArrays(1, &m_overlayVao);
     glGenBuffers(1, &m_overlayVbo);
     configureVertexArray(m_overlayVao, m_overlayVbo);
@@ -570,7 +566,6 @@ void Visualizer::render()
     if (m_worldFrameSettings.enableWorldVisualization && m_worldFrameSettings.showVirtualSensorMap)
     {
         drawVirtualSensorsFancy();
-        drawVirtualSensorMap();
     }
 
     if (m_worldFrameSettings.enableWorldVisualization && m_worldFrameSettings.showVehicleContour)
@@ -689,18 +684,6 @@ void Visualizer::cleanUp()
     {
         glDeleteVertexArrays(1, &m_vao);
         m_vao = 0;
-    }
-
-    if (m_mapVbo)
-    {
-        glDeleteBuffers(1, &m_mapVbo);
-        m_mapVbo = 0;
-    }
-
-    if (m_mapVao)
-    {
-        glDeleteVertexArrays(1, &m_mapVao);
-        m_mapVao = 0;
     }
 
     if (m_overlayVbo)
@@ -992,31 +975,6 @@ void Visualizer::drawWorldControls()
     ImGui::End();
 }
 
-void Visualizer::drawVirtualSensorMap()
-{
-    buildVirtualSensorMapVertices();
-    if (m_virtualSensorMapVertices.size() < 4)
-    {
-        return;
-    }
-
-    updateVirtualSensorMapBuffer();
-
-    GLboolean depthMask = GL_TRUE;
-    glGetBooleanv(GL_DEPTH_WRITEMASK, &depthMask);
-    glDepthMask(GL_FALSE);
-
-    glBindVertexArray(m_mapVao);
-    applyForceColor(glm::vec3(1.0F, 1.0F, 0.75F), 0.08F);
-
-    glLineWidth(2.0F);
-    glDrawArrays(GL_LINE_LOOP, 0, static_cast<GLsizei>(m_virtualSensorMapVertices.size()));
-
-    resetForceColor();
-
-    glDepthMask(depthMask);
-}
-
 void Visualizer::drawVirtualSensorsFancy()
 {
     const auto snapshots = m_virtualSensorMapping.snapshots();
@@ -1056,61 +1014,6 @@ void Visualizer::drawVirtualSensorsFancy()
     {
         drawOverlayPolygon(groundHull, glm::vec3(0.3F, 0.5F, 1.0F), 0.45F);
     }
-}
-
-void Visualizer::buildVirtualSensorMapVertices()
-{
-    struct AnglePoint
-    {
-        float angle;
-        glm::vec2 position;
-    };
-
-    const auto& hull = m_virtualSensorMapping.nonGroundHull();
-    if (hull.size() < 3)
-    {
-        m_virtualSensorMapVertices.clear();
-        return;
-    }
-
-    std::vector<AnglePoint> ordered;
-    ordered.reserve(hull.size());
-    const float twoPi = glm::two_pi<float>();
-    for (const auto& position : hull)
-    {
-        float angle = std::atan2(position.y, position.x);
-        if (angle < 0.0F)
-        {
-            angle += twoPi;
-        }
-        ordered.push_back(AnglePoint{angle, position});
-    }
-
-    std::sort(ordered.begin(), ordered.end(), [](const AnglePoint& a, const AnglePoint& b) {
-        return a.angle < b.angle;
-    });
-
-    m_virtualSensorMapVertices.clear();
-    m_virtualSensorMapVertices.reserve(ordered.size());
-    for (const auto& entry : ordered)
-    {
-        m_virtualSensorMapVertices.push_back(
-            Vertex{entry.position.x, entry.position.y, 0.0F, 0.0F, 0.0F});
-    }
-}
-
-void Visualizer::updateVirtualSensorMapBuffer()
-{
-    if (m_virtualSensorMapVertices.empty())
-    {
-        return;
-    }
-
-    glBindBuffer(GL_ARRAY_BUFFER, m_mapVbo);
-    glBufferData(GL_ARRAY_BUFFER,
-                 static_cast<GLsizeiptr>(m_virtualSensorMapVertices.size() * sizeof(Vertex)),
-                 m_virtualSensorMapVertices.data(),
-                 GL_DYNAMIC_DRAW);
 }
 
 void Visualizer::configureVertexArray(GLuint vao, GLuint vbo)

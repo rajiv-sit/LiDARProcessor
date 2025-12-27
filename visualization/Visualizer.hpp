@@ -123,10 +123,7 @@ private:
     void cleanUp();
     void applyUniforms();
     void drawWorldControls();
-    void drawVirtualSensorMap();
     void drawVirtualSensorsFancy();
-    void buildVirtualSensorMapVertices();
-    void updateVirtualSensorMapBuffer();
     void configureVertexArray(GLuint vao, GLuint vbo);
     void drawColorLegend();
     void drawLidarMountMarker(const glm::vec2& position, float rotationDegrees);
@@ -178,9 +175,6 @@ private:
     float m_minHeight = 0.0F;
     float m_maxHeight = 1.0F;
     WorldFrameSettings m_worldFrameSettings;
-    std::vector<Vertex> m_virtualSensorMapVertices;
-    GLuint m_mapVao = 0;
-    GLuint m_mapVbo = 0;
     GLuint m_overlayVao = 0;
     GLuint m_overlayVbo = 0;
     std::vector<glm::vec2> m_vehicleContour;

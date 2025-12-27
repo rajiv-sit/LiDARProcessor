@@ -566,10 +566,10 @@ void Visualizer::render()
     if (m_worldFrameSettings.enableWorldVisualization && m_worldFrameSettings.showVirtualSensorMap)
     {
         drawVirtualSensorsFancy();
-        if (m_worldFrameSettings.showFreeSpaceMap)
-        {
-            drawFreeSpaceMap();
-        }
+    }
+    if (m_worldFrameSettings.enableWorldVisualization && m_worldFrameSettings.showFreeSpaceMap)
+    {
+        drawFreeSpaceMap();
     }
 
     if (m_worldFrameSettings.enableWorldVisualization && m_worldFrameSettings.showVehicleContour)

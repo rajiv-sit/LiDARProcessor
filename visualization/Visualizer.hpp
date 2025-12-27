@@ -155,6 +155,9 @@ private:
         const mapping::LidarVirtualSensorMapping::SensorSnapshot& snapshot) const;
     std::vector<glm::vec2> buildSensorShadowPolygon(
         const mapping::LidarVirtualSensorMapping::SensorSnapshot& snapshot) const;
+    std::vector<glm::vec2> buildFreeSpacePolygon(
+        const mapping::LidarVirtualSensorMapping::SensorSnapshot& snapshot,
+        float farRange) const;
     void drawOverlayPolygon(const std::vector<glm::vec2>& positions, const glm::vec3& color, float alpha);
     void drawSensorPoint(const mapping::LidarVirtualSensorMapping::SensorSnapshot& snapshot,
                          const glm::vec3& color,

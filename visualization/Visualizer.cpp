@@ -684,20 +684,33 @@ void Visualizer::drawFreeSpaceMap()
         return;
     }
 
-    const glm::vec3 measuredColor(1.0F, 0.25F, 0.65F);
-    const glm::vec3 missingColor(0.55F, 0.15F, 0.85F);
+    const glm::vec3 freespaceColor(1.0F, 0.9F, 0.0F);
     for (const auto& snapshot : snapshots)
     {
-        const auto polygon =
-            snapshot.valid ? buildSensorMeasurementPolygon(snapshot) : buildSensorShadowPolygon(snapshot);
+        float farRange;
+        if (snapshot.valid)
+        {
+            farRange = glm::clamp(std::sqrt(snapshot.distanceSquared), 0.0F, kVirtualSensorMaxRange);
+        }
+        else
+        {
+            farRange = kVirtualSensorMaxRange;
+        }
+
+        const auto polygon = buildFreeSpacePolygon(snapshot, farRange);
         if (polygon.size() < 3)
         {
             continue;
         }
 
-        const glm::vec3& color = snapshot.valid ? measuredColor : missingColor;
-        const float alpha = snapshot.valid ? 0.25F : 0.12F;
+        const float alpha = snapshot.valid ? 0.35F : 0.15F;
+        const glm::vec3& color = freespaceColor;
         drawOverlayPolygon(polygon, color, alpha);
+
+        if (snapshot.valid)
+        {
+            drawOverlayLine(polygon[2], polygon[3], color, 0.9F);
+        }
     }
 }
 
@@ -1292,6 +1305,13 @@ std::vector<glm::vec2> Visualizer::buildSensorShadowPolygon(
     const mapping::LidarVirtualSensorMapping::SensorSnapshot& snapshot) const
 {
     return buildSensorPolygon(snapshot, 0.0F, kVirtualSensorMaxRange);
+}
+
+std::vector<glm::vec2> Visualizer::buildFreeSpacePolygon(
+    const mapping::LidarVirtualSensorMapping::SensorSnapshot& snapshot,
+    float farRange) const
+{
+    return buildSensorPolygon(snapshot, 0.0F, farRange);
 }
 
 void Visualizer::drawOverlayPolygon(const std::vector<glm::vec2>& positions,

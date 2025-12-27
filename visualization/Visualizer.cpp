@@ -55,6 +55,10 @@ constexpr float kVirtualSensorMaxRange = 120.0F;
 constexpr float kVirtualSensorThickness = 0.5F;
 constexpr float kVirtualSensorPointSize = 6.0F;
 constexpr float kGridHalfSpan = 50.0F;
+constexpr float kZoomSmoothFactor = 0.12F;
+constexpr float kPanSpeedScale = 0.004F;
+constexpr float kRotationSpeed = 0.35F;
+constexpr float kPitchLimit = 89.0F;
 
 std::string_view trim(std::string_view value)
 {
@@ -340,6 +344,7 @@ bool Visualizer::initialize()
 
     refreshVehicleProfiles();
     applyVehicleProfile(m_selectedVehicleProfileIndex);
+    resetCameraForMode(m_cameraMode);
 
     glEnable(GL_PROGRAM_POINT_SIZE);
 
@@ -802,10 +807,12 @@ void Visualizer::applyUniforms()
         const glm::mat4 projection =
             glm::perspective(glm::radians(m_camera.fov), aspect, 0.1F, 1000.0F);
 
+        m_camera.distance = glm::mix(m_camera.distance, m_camera.targetDistance, kZoomSmoothFactor);
+
         const glm::vec3 direction = computeCameraDirection();
-        const glm::vec3 cameraPos = -direction * m_camera.distance;
+        const glm::vec3 cameraPos = m_camera.target - direction * m_camera.distance;
         const glm::vec3 up = computeCameraUp();
-        const glm::mat4 view = glm::lookAt(cameraPos, glm::vec3(0.0F), up);
+        const glm::mat4 view = glm::lookAt(cameraPos, m_camera.target, up);
         const glm::mat4 viewProj = projection * view;
         glUniformMatrix4fv(viewProjLoc, 1, GL_FALSE, glm::value_ptr(viewProj));
     }
@@ -867,12 +874,15 @@ void Visualizer::drawWorldControls()
                 kCameraModeLabels.data(),
                 static_cast<int>(kCameraModeLabels.size())))
         {
-            m_cameraMode = static_cast<CameraMode>(cameraModeIdx);
-            m_camera.rotating = false;
-            m_activeMouseButton = -1;
+            const CameraMode selectedMode = static_cast<CameraMode>(cameraModeIdx);
+            if (selectedMode != m_cameraMode)
+            {
+                m_cameraMode = selectedMode;
+                resetCameraForMode(m_cameraMode);
+            }
         }
 
-        ImGui::SliderFloat("Camera distance", &m_camera.distance, 0.5F, 200.0F);
+        ImGui::SliderFloat("Camera distance", &m_camera.targetDistance, 0.5F, 200.0F);
         ImGui::SliderFloat(
             "Replay speed",
             &m_worldFrameSettings.replaySpeed,
@@ -1139,43 +1149,47 @@ int Visualizer::zoneIndexFromHeight(float height) const noexcept
 
 void Visualizer::processCursorPos(double xpos, double ypos)
 {
-    if (m_cameraMode != CameraMode::FreeOrbit || !m_camera.rotating || m_activeMouseButton == -1)
-    {
-        m_camera.lastX = xpos;
-        m_camera.lastY = ypos;
-        return;
-    }
-
     const float dx = static_cast<float>(xpos - m_camera.lastX);
     const float dy = static_cast<float>(ypos - m_camera.lastY);
     m_camera.lastX = xpos;
     m_camera.lastY = ypos;
 
-    m_camera.yaw += dx * 0.35F;
-    m_camera.pitch -= dy * 0.35F;
-    m_camera.pitch = std::clamp(m_camera.pitch, -89.0F, 89.0F);
+    if (m_dragMode == DragMode::None)
+    {
+        return;
+    }
+
+    if (m_dragMode == DragMode::Rotate)
+    {
+        m_camera.yaw += dx * kRotationSpeed;
+        m_camera.pitch -= dy * kRotationSpeed;
+        m_camera.pitch = std::clamp(m_camera.pitch, -kPitchLimit, kPitchLimit);
+        return;
+    }
+
+    const glm::vec3 direction = computeCameraDirection();
+    glm::vec3 up = computeCameraUp();
+    glm::vec3 right = glm::cross(direction, up);
+    if (glm::length(right) < 1e-6F)
+    {
+        right = glm::vec3(1.0F, 0.0F, 0.0F);
+    }
+    else
+    {
+        right = glm::normalize(right);
+    }
+    const glm::vec3 worldUp = glm::normalize(glm::cross(right, direction));
+    const float panScale = kPanSpeedScale * m_camera.distance;
+    m_camera.target += (-right * dx + worldUp * dy) * panScale;
 }
 
 void Visualizer::processScroll(double yoffset)
 {
-    m_camera.distance = std::clamp(m_camera.distance - static_cast<float>(yoffset) * kScrollSpeed, 0.5F, 200.0F);
+    m_camera.targetDistance = std::clamp(m_camera.targetDistance - static_cast<float>(yoffset) * kScrollSpeed, 0.5F, 200.0F);
 }
 
 void Visualizer::processMouseButton(int button, int action)
 {
-    if (m_cameraMode != CameraMode::FreeOrbit)
-    {
-        return;
-    }
-
-    const bool rotationButton =
-        button == GLFW_MOUSE_BUTTON_RIGHT || button == GLFW_MOUSE_BUTTON_LEFT || button == GLFW_MOUSE_BUTTON_MIDDLE;
-
-    if (!rotationButton)
-    {
-        return;
-    }
-
     if (ImGui::GetIO().WantCaptureMouse && action == GLFW_PRESS)
     {
         return;
@@ -1183,6 +1197,19 @@ void Visualizer::processMouseButton(int button, int action)
 
     if (action == GLFW_PRESS)
     {
+        if (button == GLFW_MOUSE_BUTTON_RIGHT || button == GLFW_MOUSE_BUTTON_LEFT)
+        {
+            m_dragMode = DragMode::Rotate;
+        }
+        else if (button == GLFW_MOUSE_BUTTON_MIDDLE)
+        {
+            m_dragMode = DragMode::Pan;
+        }
+        else
+        {
+            return;
+        }
+
         m_camera.rotating = true;
         m_activeMouseButton = button;
         if (m_window)
@@ -1192,6 +1219,7 @@ void Visualizer::processMouseButton(int button, int action)
     }
     else if (action == GLFW_RELEASE && button == m_activeMouseButton)
     {
+        m_dragMode = DragMode::None;
         m_camera.rotating = false;
         m_activeMouseButton = -1;
     }
@@ -1502,6 +1530,36 @@ void Visualizer::updateSensorOffsets()
     m_virtualSensorMapping.setVehicleContour(m_translatedContour);
 }
 
+void Visualizer::resetCameraForMode(CameraMode mode)
+{
+    m_camera.yaw = 0.0F;
+    m_camera.pitch = 0.0F;
+    m_camera.target = glm::vec3(0.0F);
+    m_camera.targetDistance = std::clamp(m_camera.targetDistance, 0.5F, 200.0F);
+    m_camera.distance = m_camera.targetDistance;
+    m_camera.rotating = false;
+    m_dragMode = DragMode::None;
+    m_activeMouseButton = -1;
+}
+
+glm::vec2 Visualizer::baseCameraAngles(CameraMode mode)
+{
+    switch (mode)
+    {
+        case CameraMode::BirdsEye:
+            return glm::vec2(0.0F, -90.0F);
+        case CameraMode::Front:
+            return glm::vec2(-90.0F, 0.0F);
+        case CameraMode::Side:
+            return glm::vec2(0.0F, 0.0F);
+        case CameraMode::Rear:
+            return glm::vec2(90.0F, 0.0F);
+        case CameraMode::FreeOrbit:
+        default:
+            return glm::vec2(45.0F, 25.0F);
+    }
+}
+
 float Visualizer::distanceToContour(const glm::vec2& point) const
 {
     if (m_translatedContour.size() < 2)
@@ -1621,26 +1679,13 @@ glm::vec3 Visualizer::sampleIntensityColor(float normalized) const
 
 glm::vec3 Visualizer::computeCameraDirection() const
 {
-    switch (m_cameraMode)
-    {
-        case CameraMode::BirdsEye:
-            return glm::vec3(0.0F, 0.0F, -1.0F);
-        case CameraMode::Front:
-            return glm::vec3(0.0F, -1.0F, 0.0F);
-        case CameraMode::Side:
-            return glm::vec3(1.0F, 0.0F, 0.0F);
-        case CameraMode::Rear:
-            return glm::vec3(0.0F, 1.0F, 0.0F);
-        default:
-        {
-            const float pitchRad = glm::radians(m_camera.pitch);
-            const float yawRad = glm::radians(m_camera.yaw);
-            return glm::vec3(
-                std::cos(pitchRad) * std::cos(yawRad),
-                std::cos(pitchRad) * std::sin(yawRad),
-                std::sin(pitchRad));
-        }
-    }
+    const glm::vec2 baseAngles = baseCameraAngles(m_cameraMode);
+    const float finalYaw = baseAngles.x + m_camera.yaw;
+    const float finalPitch = std::clamp(baseAngles.y + m_camera.pitch, -kPitchLimit, kPitchLimit);
+    const float pitchRad = glm::radians(finalPitch);
+    const float yawRad = glm::radians(finalYaw);
+    const float cosPitch = std::cos(pitchRad);
+    return glm::vec3(cosPitch * std::cos(yawRad), cosPitch * std::sin(yawRad), std::sin(pitchRad));
 }
 
 glm::vec3 Visualizer::computeCameraUp() const

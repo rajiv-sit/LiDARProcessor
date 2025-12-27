@@ -71,15 +71,24 @@ private:
         Rear
     };
 
+    enum class DragMode
+    {
+        None = 0,
+        Rotate,
+        Pan
+    };
+
     struct Camera
     {
         float distance = 30.0F;
-        float yaw = 45.0F;
-        float pitch = 25.0F;
+        float yaw = 0.0F;
+        float pitch = 0.0F;
         float fov = 45.0F;
         bool rotating = false;
         double lastX = 0.0;
         double lastY = 0.0;
+        float targetDistance = 30.0F;
+        glm::vec3 target = glm::vec3(0.0F);
     };
 
     enum class ColorMode
@@ -139,6 +148,7 @@ private:
     void applyVehicleProfile(int index);
     void drawGrid(float spacing = 0.5F);
     int zoneIndexFromHeight(float height) const noexcept;
+    static glm::vec2 baseCameraAngles(CameraMode mode);
     static void cursorPosCallback(GLFWwindow* window, double xpos, double ypos);
     static void scrollCallback(GLFWwindow* window, double xoffset, double yoffset);
     static void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods);
@@ -160,6 +170,7 @@ private:
     void resetForceColor();
     void updateContourTranslation();
     void updateSensorOffsets();
+    void resetCameraForMode(CameraMode mode);
     float distanceToContour(const glm::vec2& point) const;
     float distanceToSegment(const glm::vec2& a, const glm::vec2& b, const glm::vec2& point) const;
     GLFWwindow* m_window = nullptr;
@@ -192,6 +203,7 @@ private:
     float m_closestContourDistance = std::numeric_limits<float>::max();
     Camera m_camera;
     CameraMode m_cameraMode = CameraMode::FreeOrbit;
+    DragMode m_dragMode = DragMode::None;
     int m_activeMouseButton = -1;
     mapping::LidarVirtualSensorMapping m_virtualSensorMapping;
     float m_mountHeight = 1.8F;

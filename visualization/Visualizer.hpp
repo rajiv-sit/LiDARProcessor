@@ -73,9 +73,9 @@ private:
 
     struct Camera
     {
-        float distance = 30.0F;
-        float yaw = 45.0F;
-        float pitch = 25.0F;
+        float distance = 15.0F;
+        float yaw = 90.0F;
+        float pitch = -25.0F;
         float fov = 45.0F;
         bool rotating = false;
         double lastX = 0.0;
@@ -130,7 +130,11 @@ private:
     void configureVertexArray(GLuint vao, GLuint vbo);
     void drawColorLegend();
     void drawLidarMountMarker(const glm::vec2& position, float rotationDegrees);
-    void drawOverlayLine(const glm::vec2& from, const glm::vec2& to, const glm::vec3& color, float alpha);
+    void drawOverlayLine(const glm::vec2& from,
+                         const glm::vec2& to,
+                         const glm::vec3& color,
+                         float alpha,
+                         float elevation = 0.0F);
     bool isGroundPoint(const lidar::LidarPoint& point) const noexcept;
     void processCursorPos(double xpos, double ypos);
     void processScroll(double yoffset);

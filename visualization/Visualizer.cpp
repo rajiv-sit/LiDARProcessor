@@ -38,18 +38,50 @@ constexpr std::array<const char*, 3> kColorModeLabels = {"Classification", "Heig
 constexpr std::array<const char*, 2> kAlphaModeLabels = {"User value", "Intensity"};
 constexpr std::array<const char*, 5> kCameraModeLabels = {"Free orbit", "Bird's eye", "Front", "Side", "Rear"};
 constexpr float kScrollSpeed = 2.0F;
-constexpr std::array<const char*, 5> kZoneLabels = {
-    "z < -1.5 m",
-    "-1.5 m <= z < 0 m",
-    "z = 0 m",
-    "0 m < z < 1.5 m",
-    "z >= 1.5 m"};
-const std::array<glm::vec3, 5> kZoneColors = {
-    glm::vec3(0.1F, 0.4F, 0.9F),
-    glm::vec3(0.0F, 0.8F, 0.5F),
-    glm::vec3(1.0F, 0.9F, 0.3F),
-    glm::vec3(1.0F, 0.55F, 0.0F),
-    glm::vec3(0.9F, 0.1F, 0.1F)};
+constexpr std::array<const char*, 14> kZoneLabels = {
+    "z < -1.75 m",
+    "-1.75 m <= z < -1.50 m",
+    "-1.50 m <= z < -1.25 m",
+    "-1.25 m <= z < -1.00 m",
+    "-1.00 m <= z < -0.75 m",
+    "-0.75 m <= z < -0.50 m",
+    "-0.50 m <= z < 0.00 m",
+    "0.00 m <= z < 0.50 m",
+    "0.50 m <= z < 0.75 m",
+    "0.75 m <= z < 1.00 m",
+    "1.00 m <= z < 1.25 m",
+    "1.25 m <= z < 1.50 m",
+    "1.50 m <= z < 1.75 m",
+    "z >= 1.75 m"};
+const std::array<glm::vec3, 14> kZoneColors = {
+    glm::vec3(0.05F, 0.25F, 0.85F),
+    glm::vec3(0.1F, 0.35F, 0.85F),
+    glm::vec3(0.15F, 0.45F, 0.8F),
+    glm::vec3(0.2F, 0.55F, 0.7F),
+    glm::vec3(0.25F, 0.65F, 0.6F),
+    glm::vec3(0.3F, 0.75F, 0.45F),
+    glm::vec3(0.3F, 0.85F, 0.3F),
+    glm::vec3(0.6F, 0.9F, 0.2F),
+    glm::vec3(0.8F, 0.85F, 0.15F),
+    glm::vec3(0.9F, 0.7F, 0.1F),
+    glm::vec3(0.95F, 0.55F, 0.05F),
+    glm::vec3(1.0F, 0.35F, 0.0F),
+    glm::vec3(1.0F, 0.15F, 0.05F),
+    glm::vec3(0.85F, 0.0F, 0.15F)};
+constexpr std::array<float, kZoneColors.size() - 1> kZoneThresholds = {
+    -1.75F,
+    -1.50F,
+    -1.25F,
+    -1.00F,
+    -0.75F,
+    -0.50F,
+    0.00F,
+    0.50F,
+    0.75F,
+    1.00F,
+    1.25F,
+    1.50F,
+    1.75F};
 constexpr float kDefaultMountHeight = 1.8F;
 constexpr float kVirtualSensorMaxRange = 120.0F;
 constexpr float kVirtualSensorThickness = 0.5F;
@@ -1118,23 +1150,14 @@ bool Visualizer::isGroundPoint(const lidar::LidarPoint& point) const noexcept
 
 int Visualizer::zoneIndexFromHeight(float height) const noexcept
 {
-    if (height < -1.5F)
+    for (size_t i = 0; i < kZoneThresholds.size(); ++i)
     {
-        return 0;
+        if (height < kZoneThresholds[i])
+        {
+            return static_cast<int>(i);
+        }
     }
-    if (height < 0.0F)
-    {
-        return 1;
-    }
-    if (std::fabs(height) < 1e-3F)
-    {
-        return 2;
-    }
-    if (height < 1.5F)
-    {
-        return 3;
-    }
-    return 4;
+    return static_cast<int>(kZoneColors.size() - 1);
 }
 
 void Visualizer::processCursorPos(double xpos, double ypos)
@@ -1364,11 +1387,12 @@ void Visualizer::drawOverlayPolygon(const std::vector<glm::vec2>& positions,
 void Visualizer::drawOverlayLine(const glm::vec2& from,
                                  const glm::vec2& to,
                                  const glm::vec3& color,
-                                 float alpha)
+                                 float alpha,
+                                 float elevation)
 {
     Vertex vertices[2] = {
-        Vertex{from.x, from.y, 0.0F, 0.0F, 0.0F},
-        Vertex{to.x, to.y, 0.0F, 0.0F, 0.0F},
+        Vertex{from.x, from.y, elevation, 0.0F, 0.0F},
+        Vertex{to.x, to.y, elevation, 0.0F, 0.0F},
     };
 
     glBindVertexArray(m_overlayVao);
@@ -1441,11 +1465,11 @@ void Visualizer::drawGrid(float spacing)
 
     for (float x = startX; x <= endX; x += gridSpacing)
     {
-        drawOverlayLine(glm::vec2(x, startY), glm::vec2(x, endY), gridColor, alpha);
+        drawOverlayLine(glm::vec2(x, startY), glm::vec2(x, endY), gridColor, alpha, m_floorHeight);
     }
     for (float y = startY; y <= endY; y += gridSpacing)
     {
-        drawOverlayLine(glm::vec2(startX, y), glm::vec2(endX, y), gridColor, alpha);
+        drawOverlayLine(glm::vec2(startX, y), glm::vec2(endX, y), gridColor, alpha, m_floorHeight);
     }
 }
 

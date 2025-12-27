@@ -53,14 +53,14 @@ LiDARProcessor is a standalone C++20 application that replays Velodyne `.pcap` t
 - Flip camera views, adjust zoom, and switch color modes to observe how the altitude zone legend plus stats window react to live scans.
 
 ## Visual Reference
-![LiDAR point cloud](assets/placeholders/lidar.png)
+<img width="1911" height="1029" alt="image" src="https://github.com/user-attachments/assets/5cb40403-ac21-41d4-bebb-f5d9e4e6f504" />
 Figure 1: The LiDAR point cloud colored by the current palette and split into ground/non-ground buffers.
 
-![Free-space map](assets/placeholders/free_space.png)
+<img width="1910" height="1028" alt="image" src="https://github.com/user-attachments/assets/7522951d-44b2-4e9f-887b-f0b3b6d73635" />
 Figure 2: Yellow coverage sectors show the maximum measurement range per virtual sensor bin, respecting `kVirtualSensorMaxRange`.
 
-![Alternative view](assets/placeholders/other.png)
-Figure 3: A different camera/visualization mode for comparison (e.g., side or rear view).
+<img width="1916" height="1028" alt="image" src="https://github.com/user-attachments/assets/916b928d-0c3f-4cd7-8689-5ba30826e7bd" />
+Figure 3: Freespace mapping.
 
 ## LiDAR Ecosystem & Roadmap
 - **Current support**: Velodyne HDL/VLP sensors via `reader/src/VelodynePCAPReader.cpp`; new drivers can reuse the `BaseLidarSensor` interface.

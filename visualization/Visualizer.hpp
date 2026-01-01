@@ -2,6 +2,7 @@
 
 #include "sensors/BaseLidarSensor.hpp"
 #include "mapping/LidarVirtualSensorMapping.hpp"
+#include "visualization/IVisualizer.hpp"
 #include "visualization/Shader.hpp"
 
 #include <GL/glew.h>
@@ -38,19 +39,19 @@ struct VehicleProfileData
 };
 using BaseLidarSensor = lidar::BaseLidarSensor;
 
-class Visualizer
+class Visualizer : public IVisualizer
 {
 public:
     Visualizer() = default;
     ~Visualizer();
 
-    bool initialize();
-    void updatePoints(const BaseLidarSensor::PointCloud& points);
-    void render();
-    bool windowShouldClose() const;
+    bool initialize() override;
+    void updatePoints(const BaseLidarSensor::PointCloud& points) override;
+    void render() override;
+    bool windowShouldClose() const override;
     glm::vec3 computeCameraDirection() const;
     glm::vec3 computeCameraUp() const;
-    float frameSpeedScale() const;
+    float frameSpeedScale() const override;
 
 private:
     struct Vertex

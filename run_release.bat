@@ -10,7 +10,7 @@ cmake -S . -B build -G "Visual Studio 17 2022" -DCMAKE_TOOLCHAIN_FILE=build/cona
 cmake --build build --config Release
 mkdir build\Release\shaders 1>NUL 2>NUL
 robocopy shaders build\Release\shaders /E /z
-robocopy ..\Assets\visualization build\Release imgui.ini /z
+robocopy visualization build\Release imgui.ini /z
 mkdir build\Release\data 1>NUL 2>NUL
 robocopy data build\Release\data /E /z
 PUSHD build\Release

@@ -14,6 +14,8 @@ namespace lidar
 class VelodyneLidar : public BaseLidarSensor
 {
 public:
+    friend struct VelodyneLidarTestHelper;
+
     explicit VelodyneLidar(std::string identifier, std::string pcapPath);
     ~VelodyneLidar() override;
 

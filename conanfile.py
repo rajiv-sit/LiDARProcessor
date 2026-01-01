@@ -17,7 +17,7 @@ class LiDARProcessorConan(ConanFile):
         "imgui/*:opengl3": True,
     }
     generators = "CMakeDeps", "CMakeToolchain"
-    exports_sources = "CMakeLists.txt", "src/*", "include/*", "shaders/*", "data/*"
+    exports_sources = "CMakeLists.txt", "src/*", "include/*", "shaders/*", "data/*", "unitTests/*"
 
     def config_options(self):
         if self.settings.os == "Windows":
@@ -34,6 +34,7 @@ class LiDARProcessorConan(ConanFile):
         self.requires("glm/cci.20230113")
         self.requires("imgui/cci.20230105+1.89.2.docking")
         self.requires("opengl/system")
+        self.requires("gtest/1.14.0")
 
     def build_requirements(self):
         self.tool_requires("cmake/3.30.1")

@@ -1,17 +1,25 @@
 #include "engine/LidarEngine.hpp"
+#include "visualization/Visualizer.hpp"
 
 #include <iostream>
 #include <chrono>
+#include <memory>
 #include <thread>
 
 namespace lidar
 {
 
-LidarEngine::LidarEngine(std::unique_ptr<BaseLidarSensor> sensor)
+LidarEngine::LidarEngine(std::unique_ptr<BaseLidarSensor> sensor,
+                         std::unique_ptr<visualization::IVisualizer> visualizer)
     : m_sensor(std::move(sensor))
+    , m_visualizer(std::move(visualizer))
     , m_readIndex(0U)
     , m_latestTimestamp(0U)
 {
+    if (!m_visualizer)
+    {
+        m_visualizer = std::make_unique<visualization::Visualizer>();
+    }
 }
 
 bool LidarEngine::initialize()
@@ -24,7 +32,7 @@ bool LidarEngine::initialize()
 
     m_sensor->configure(30.0F, 120.0F);
     std::cout << "Preparing sensor " << m_sensor->identifier() << '\n';
-    return m_visualizer.initialize();
+    return m_visualizer->initialize();
 }
 
 void LidarEngine::run()
@@ -34,17 +42,17 @@ void LidarEngine::run()
         return;
     }
 
-    while (!m_visualizer.windowShouldClose())
+    while (!m_visualizer->windowShouldClose())
     {
         const auto frameStart = std::chrono::steady_clock::now();
 
         captureFrame();
-        m_visualizer.updatePoints(m_pointBuffers[m_readIndex]);
-        m_visualizer.render();
+        m_visualizer->updatePoints(m_pointBuffers[m_readIndex]);
+        m_visualizer->render();
 
         m_readIndex = (m_readIndex + 1U) % m_pointBuffers.size();
 
-        const auto scaledTarget = kTargetFrameDuration / m_visualizer.frameSpeedScale();
+        const auto scaledTarget = kTargetFrameDuration / m_visualizer->frameSpeedScale();
         const auto frameDuration = std::chrono::steady_clock::now() - frameStart;
         if (frameDuration < scaledTarget)
         {

@@ -1123,7 +1123,7 @@ void Visualizer::drawWorldControls()
             "Replay speed",
             &m_worldFrameSettings.replaySpeed,
             0.1F,
-            2.5F,
+            31.0F,
             "%.2f");
 
         int colorModeIdx = static_cast<int>(m_worldFrameSettings.colorMode);
